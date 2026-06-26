@@ -9,15 +9,14 @@
 <style>
   *, *::before, *::after {
     margin: 0; padding: 0; box-sizing: border-box;
-    /* Niente selezione testo / lente / callout durante l'interazione (mobile) */
     -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none; user-select: none;
     -webkit-touch-callout: none;
   }
   html { background: #000; }
   html, body {
     width: 100%; height: 100%; background: #000; overflow: hidden; cursor: none;
-    -webkit-tap-highlight-color: transparent;  /* niente flash al tocco su mobile */
-    touch-action: none;                          /* niente scroll/zoom/selezione di default */
+    -webkit-tap-highlight-color: transparent;
+    touch-action: none;
     overscroll-behavior: none;
   }
   canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; background: #000; touch-action: none; }
@@ -37,14 +36,9 @@
   <strong>FOBOS</strong>
   <span>un server di test di Industree Hub</span>
 </div>
-
 <script>
 (function () {
 'use strict';
-
-// ═══════════════════════════════════════════════
-// VERTEX
-// ═══════════════════════════════════════════════
 var VS = [
 'attribute vec2 a_pos;',
 'varying vec2 v_uv;',
@@ -53,32 +47,25 @@ var VS = [
 '  gl_Position = vec4(a_pos, 0.0, 1.0);',
 '}'
 ].join('\n');
-
-// ═══════════════════════════════════════════════
-// FRAGMENT — seta / inchiostro liquido
-// ═══════════════════════════════════════════════
 var FS = [
 'precision highp float;',
 'varying vec2 v_uv;',
 'uniform float u_time;',
-'uniform float u_warpTime;',  // tempo del background, accelera in interazione
-'uniform float u_ar;',        // aspect ratio (precalcolato su CPU)
-'uniform float u_fitT;',      // fattore di fit del testo (precalcolato su CPU)
+'uniform float u_warpTime;',
+'uniform float u_ar;',
+'uniform float u_fitT;',
 'uniform vec2  u_mouse;',
 'uniform float u_interact;',
 'uniform vec2  u_res;',
-'uniform vec2  u_seed;',    // random per ogni caricamento
-'uniform vec2  u_bdir;',    // direzione banda satinata (calcolata su CPU dal seed)
-'uniform vec3  u_emberCol;',// colore brace (calcolato su CPU dal seed)
+'uniform vec2  u_seed;',
+'uniform vec2  u_bdir;',
+'uniform vec3  u_emberCol;',
 'uniform sampler2D u_text;',
-
-// ─── Value noise SMOOTH (quintic) — niente grana ───
 'float hash(vec2 p){',
 '  p = fract(p*vec2(123.34, 456.21));',
 '  p += dot(p, p+45.32);',
 '  return fract(p.x*p.y);',
 '}',
-// Quintic smoothstep → derivata continua → gradienti vellutati
 'float vnoise(vec2 p){',
 '  vec2 i=floor(p), f=fract(p);',
 '  vec2 u=f*f*f*(f*(f*6.0-15.0)+10.0);',
@@ -88,8 +75,6 @@ var FS = [
 '  float d=hash(i+vec2(1,1));',
 '  return mix(mix(a,b,u.x), mix(c,d,u.x), u.y);',
 '}',
-
-// FBM bassissima frequenza, sole 3 ottave — campo fluido, mai grana
 'float flow(vec2 p){',
 '  float v=0.0;',
 '  v += 0.60*vnoise(p);          p = p*1.9 + vec2(2.1, 8.3);',
@@ -97,31 +82,22 @@ var FS = [
 '  v += 0.10*vnoise(p);',
 '  return v;',
 '}',
-
-// ─── ACES filmic ─────────────────────────────
 'vec3 aces(vec3 x){',
 '  return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14),0.0,1.0);',
 '}',
-
-// Dither triangolare sotto-soglia (anti-banding, NON grana)
 'float dither(vec2 uv){',
 '  float r = hash(uv*vec2(311.7,127.1));',
 '  float g = hash(uv*vec2(269.5,183.3)+17.0);',
-'  return (r+g-1.0);',  // distribuzione triangolare [-1,1]
+'  return (r+g-1.0);',
 '}',
-
-// ═══════════════════════════════════════════════
 'void main(){',
 '  vec2 uv = v_uv;',
 '  float ar = u_ar;',
 '  vec2 auv    = vec2((uv.x-0.5)*ar, uv.y-0.5);',
 '  vec2 amouse = vec2((u_mouse.x-0.5)*ar, u_mouse.y-0.5);',
 '  float t = u_time;',
-
-// ─── DOMAIN WARP doppio (pieghe di raso) ──────
-// Movimento idle quasi nullo: coefficienti minuscoli
-'  vec2 p = uv * vec2(2.6*ar, 2.6) + u_seed;',   // offset random → pieghe diverse ad ogni load
-'  float tw = u_warpTime;',  // accelera dolcemente durante l\'interazione
+'  vec2 p = uv * vec2(2.6*ar, 2.6) + u_seed;',
+'  float tw = u_warpTime;',
 '  vec2 q = vec2(',
 '    flow(p + vec2(0.0, 0.0) + tw*0.008),',
 '    flow(p + vec2(5.2, 1.3) - tw*0.006)',
@@ -130,74 +106,50 @@ var FS = [
 '    flow(p + 3.0*q + vec2(1.7, 9.2) + tw*0.010),',
 '    flow(p + 3.0*q + vec2(8.3, 2.8) - tw*0.007)',
 '  );',
-'  float silk = flow(p + 2.4*r);',          // campo di altezza della seta
-
-// Pendenza per lo sheen anisotropo
+'  float silk = flow(p + 2.4*r);',
 '  float e = 0.0016;',
 '  float sx = flow(p+vec2(e,0.0)+2.4*r) - silk;',
 '  float sy = flow(p+vec2(0.0,e)+2.4*r) - silk;',
 '  vec2 slope = vec2(sx, sy)/e;',
-
-// ─── PALETTE SETA (carbone → rosso-fumo) ─────
-'  vec3 deep   = vec3(0.024, 0.014, 0.012);',   // piega profonda
-'  vec3 carbon = vec3(0.075, 0.050, 0.046);',   // carbone
-'  vec3 smoke  = vec3(0.230, 0.075, 0.060);',   // rosso-fumo sulle creste
+'  vec3 deep   = vec3(0.024, 0.014, 0.012);',
+'  vec3 carbon = vec3(0.075, 0.050, 0.046);',
+'  vec3 smoke  = vec3(0.230, 0.075, 0.060);',
 '  vec3 col = mix(deep, carbon, smoothstep(0.30, 0.62, silk));',
 '  col = mix(col, smoke, smoothstep(0.60, 0.92, silk));',
-
-// ─── SHEEN ANISOTROPO IRIDESCENTE (il "setoso") ──
-// Highlight allungato lungo la direzione del flusso
 '  float sheenDir = slope.x*0.7 - slope.y*0.7;',
 '  float sheenPhase = silk*7.0 + sheenDir*2.2;',
 '  float sb = clamp(0.5+0.5*sin(sheenPhase), 0.0, 1.0);',
-'  float sheen = sb*sb*sb*sqrt(sb);',   // = sb^3.5 esatto, senza pow/exp/log
-// Iridescenza calda: il riflesso vira tra rame e cremisi (thin-film, gamut caldo)
+'  float sheen = sb*sb*sb*sqrt(sb);',
 '  float irid = 0.5 + 0.5*sin(sheenPhase*0.5 + silk*3.0);',
 '  vec3 copper  = vec3(0.40, 0.20, 0.11);',
 '  vec3 crimson = vec3(0.34, 0.06, 0.05);',
 '  vec3 sheenCol = mix(crimson, copper, irid);',
 '  col += sheenCol * sheen * smoothstep(0.45,0.95,silk) * (1.0 - u_interact*0.25);',
-
-// ─── BANDA SATINATA che scorre lentissima ────
-// Luce di studio che attraversa il tessuto — direzione random ad ogni load
-// (u_bdir e fase precalcolati su CPU dal seed)
 '  float bandCoord = dot(uv, u_bdir) - t*0.009;',
 '  float band = pow(0.5+0.5*sin(bandCoord*3.1416 + u_seed.y*6.2831), 2.2);',
 '  col += sheenCol * band * sheen * 0.5 * (1.0 - u_interact*0.25);',
-
-// ─── BRACE ROSSA DIFFUSA (liscia, respira) ───
-// Vive nelle creste della seta, pulsazione ipnotica con fase random
 '  float breath = 0.55 + 0.45*sin(t*0.13 + silk*4.0 + u_seed.x*6.2831);',
 '  float emberMask = smoothstep(0.55, 0.95, silk);',
-// In interazione la brace si ACCENDE a fuoco: più intensa, più calda, con guizzo.
-// Il guizzo (2 sin) e il fuoco si calcolano solo durante l\'interazione.
 '  float emberBase = emberMask * breath;',
 '  vec3 burnCol = u_emberCol;',
 '  float emberStr = emberBase * 0.40;',
 '  if (u_interact > 0.0001) {',
 '    float flick = 0.80 + 0.20*sin(t*2.3 + silk*8.0)*sin(t*1.7 + silk*5.0);',
-'    burnCol = mix(u_emberCol, vec3(0.80, 0.14, 0.022), u_interact*0.82);',  // cupo → fuoco scuro
+'    burnCol = mix(u_emberCol, vec3(0.80, 0.14, 0.022), u_interact*0.82);',
 '    emberStr = emberBase * (0.40 + u_interact*2.5*flick);',
 '  }',
 '  col += burnCol * emberStr;',
-// Bagliore caldo atmosferico, intensificato dal fuoco durante l\'interazione
 '  col += vec3(0.030, 0.006, 0.004) * silk * (1.0 + u_interact*0.6);',
-
-// ─── LUCE BLU LIQUIDA (interazione) ──────────
-// Colori luce (servono anche al glow del testo → fuori dal branch)
 '  vec3 ice    = vec3(0.918, 0.965, 1.000);',
 '  vec3 cobalt = vec3(0.162, 0.502, 1.000);',
 '  vec3 abyss  = vec3(0.039, 0.118, 0.353);',
 '  float light = 0.0;',
 '  float ambient = 0.0;',
 '  vec3 lightCol = vec3(0.0);',
-// Tutto il costo della luce SOLO durante l\'interazione. u_interact è un
-// uniform → branch coerente su tutti i pixel, nessuna divergenza, resa identica.
 '  if (u_interact > 0.0001) {',
 '    float ir  = u_interact;',
 '    float ir2 = ir*ir;',
 '    float ir4 = ir2*ir2;',
-// Flusso temporale dedicato → bordi che colano come inchiostro, lento e liquido
 '    vec2 lflow = vec2(',
 '      flow(p*0.85 + vec2( t*0.028, -t*0.009) + 11.3),',
 '      flow(p*0.85 + vec2(-t*0.011,  t*0.026) + 23.7)',
@@ -205,7 +157,6 @@ var FS = [
 '    vec2 inkOffset = (lflow*0.26 + (r-0.5)*0.16) * (0.45 + ir);',
 '    vec2 lp = auv + inkOffset;',
 '    float dist = length(lp - amouse);',
-// Solo luce DIFFUSA: raggio grande con respiro morbido, nessun nucleo/hotspot
 '    float lR = (0.30 + ir2*0.75) * (1.0 + 0.06*sin(t*0.45 + silk*3.0));',
 '    float lRm = lR * (0.85 + 0.30*silk + 0.10*lflow.x);',
 '    float glow = exp(-dist*dist / (lRm*lRm + 0.0001));',
@@ -217,81 +168,46 @@ var FS = [
 '    float lr = clamp(dist/max(lR,0.01), 0.0, 2.2);',
 '    lightCol = mix(abyss, cobalt, smoothstep(1.6, 0.20, lr));',
 '  }',
-
-// Contrasto della seta accentuato dove arriva la luce: pivot basso →
-// le pieghe scure diventano più scure, le creste più luminose (background inciso)
 '  col = clamp((col - 0.14)*(1.0 + light*1.45) + 0.14, 0.0, 1.0);',
-
-// PROTEZIONE DEL ROSSO: dove la brace arde è emissiva → il blu non la
-// sostituisce né le si somma sopra (così resta rossa anche a luce blu piena)
 '  float redKeep = clamp(emberStr*1.3, 0.0, 0.86);',
-
-// Blend morbido — quando idle light=0, questi termini sono nulli
 '  col = mix(col, lightCol, clamp(light*0.92, 0.0, 0.82) * (1.0 - redKeep));',
 '  col += lightCol * light * 0.30 * (1.0 - redKeep);',
 '  col += abyss * ambient * 0.9 * (1.0 - redKeep*0.6);',
-// Riflesso satinato freddo sulla seta illuminata (sheen vira al blu)
 '  col += vec3(0.10,0.30,0.55) * sheen * light * 0.5 * (1.0 - redKeep*0.7);',
-
-// ─── TESTO — campionamento che PRESERVA le proporzioni ───
-// La texture è 2:1; mappata "contain" + zoom così non si deforma mai
-// con l\'aspect ratio dello schermo (fondamentale in portrait su iPhone)
 '  float fitT = u_fitT;',
 '  vec2 tuv = vec2(auv.x/(2.0*fitT), auv.y/fitT) + 0.5;',
 '  vec2 inb = step(vec2(0.0), tuv) * step(tuv, vec2(1.0));',
 '  float tx = texture2D(u_text, tuv).r * inb.x * inb.y;',
-// Testo SEMPRE presente: a riposo quasi nero (silhouette appena percettibile),
-// in interazione sfuma al bianco. FOBOS (alto) schiarisce prima del sottotitolo.
 '  float depth = 1.0 + (1.0-uv.y)*0.55;',
 '  float rev = smoothstep(0.02, 0.45*depth, light);',
-'  rev = max(rev, smoothstep(0.12, 0.85, u_interact)*0.9);',  // qualunque interazione schiarisce
-'  vec3 tcol = mix(vec3(0.0), vec3(1.0), rev);',              // nero → bianco
-'  float a = tx * mix(0.22, 0.99, rev);',                    // velo scuro a riposo, pieno in interazione
+'  rev = max(rev, smoothstep(0.12, 0.85, u_interact)*0.9);',
+'  vec3 tcol = mix(vec3(0.0), vec3(1.0), rev);',
+'  float a = tx * mix(0.22, 0.99, rev);',
 '  col = mix(col, tcol, a);',
-// Glow freddo attorno alle lettere, solo quando la luce arriva
 '  col += mix(cobalt, ice, 0.5) * smoothstep(0.04,0.30,light) * tx * 0.30;',
-
-// ─── POST ─────────────────────────────────────
-// Drappo verticale: la parte alta lievemente più scura → volume
 '  col *= 0.88 + 0.12*uv.y;',
-
-// Vignette morbida voluminosa
 '  float vd = length((uv-0.5)*vec2(1.05,1.0))*2.2;',
 '  float vig = 1.0 - smoothstep(0.25, 1.05, vd);',
 '  col *= 0.38 + 0.62*vig;',
-
-// Tone mapping filmico
 '  col = aces(col*1.20);',
-
-// Color grading: ombre fredde, alte luci calde (split-tone cinematografico)
 '  float luma = dot(col, vec3(0.299,0.587,0.114));',
-'  col += vec3(-0.010,0.0,0.018) * (1.0-luma);',   // ombre verso il blu
-'  col += vec3( 0.014,0.004,-0.006) * luma;',       // luci verso il caldo
+'  col += vec3(-0.010,0.0,0.018) * (1.0-luma);',
+'  col += vec3( 0.014,0.004,-0.006) * luma;',
 '  col = clamp(col, 0.0, 1.0);',
-// Saturazione +leggera e contrasto morbido
 '  col = mix(vec3(luma), col, 1.10);',
 '  col = clamp((col-0.5)*1.06 + 0.5, 0.0, 1.0);',
-
-// Dither sotto-soglia: uccide il banding, invisibile come grana
 '  col += dither(uv*u_res) * (1.0/255.0);',
-
 '  gl_FragColor = vec4(clamp(col,0.0,1.0), 1.0);',
 '}'
 ].join('\n');
-
-// ═══════════════════════════════════════════════
-// BOOTSTRAP WebGL
-// ═══════════════════════════════════════════════
 var canvas = document.getElementById('c');
 var gl = canvas.getContext('webgl',{antialias:false,alpha:false,depth:false,stencil:false})
       || canvas.getContext('experimental-webgl',{antialias:false,alpha:false});
-
 if (!gl) {
   canvas.style.display = 'none';
   document.getElementById('fallback').style.display = 'flex';
   return;
 }
-
 function compile(type, src) {
   var s = gl.createShader(type);
   gl.shaderSource(s, src);
@@ -302,7 +218,6 @@ function compile(type, src) {
   }
   return s;
 }
-
 var prog = gl.createProgram();
 var vs = compile(gl.VERTEX_SHADER, VS);
 var fs = compile(gl.FRAGMENT_SHADER, FS);
@@ -321,14 +236,12 @@ if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
   return;
 }
 gl.useProgram(prog);
-
 var vbo = gl.createBuffer();
 gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
 gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
 var aPos = gl.getAttribLocation(prog, 'a_pos');
 gl.enableVertexAttribArray(aPos);
 gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
-
 var U = {
   time:     gl.getUniformLocation(prog,'u_time'),
   warpTime: gl.getUniformLocation(prog,'u_warpTime'),
@@ -342,32 +255,19 @@ var U = {
   emberCol: gl.getUniformLocation(prog,'u_emberCol'),
   text:     gl.getUniformLocation(prog,'u_text')
 };
-
-// Seed random per ogni caricamento → composizione sempre diversa
 var seedX = Math.random()*1000.0;
 var seedY = Math.random()*1000.0;
 gl.uniform2f(U.seed, seedX, seedY);
-
-// Costanti derivate dal seed, calcolate UNA VOLTA su CPU (prima erano per-pixel):
-// direzione della banda satinata
 var bang = seedX*1.7 + seedY*0.9;
 var bdx = Math.cos(bang), bdy = Math.sin(bang);
 var blen = Math.sqrt(bdx*bdx + bdy*bdy) || 1.0;
 gl.uniform2f(U.bdir, bdx/blen, bdy/blen);
-// colore brace (cremisi ↔ rosso-arancio)
 var warmth = 0.5 + 0.5*Math.sin(seedX*2.3 + seedY*1.1);
 gl.uniform3f(U.emberCol,
   0.46 + (0.55-0.46)*warmth,
   0.070 + (0.110-0.070)*warmth,
   0.045 + (0.022-0.045)*warmth);
-
-// ═══════════════════════════════════════════════
-// TEXTURE TESTO — cascata di font di sistema moderni
-//   su iPhone/Mac → SF Pro, Windows → Segoe UI, Android → Roboto
-// ═══════════════════════════════════════════════
 var SYS = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
-
-// Disegna testo centrato con tracking (spaziatura) manuale e robusto
 function drawTracked(ctx, text, cx, y, trackPx) {
   var widths = [], total = 0;
   for (var i = 0; i < text.length; i++) {
@@ -384,33 +284,26 @@ function drawTracked(ctx, text, cx, y, trackPx) {
   }
   ctx.textAlign = prevAlign;
 }
-
 function buildTextTexture(existing) {
   var W = 2048, H = 1024;
   var tc = document.createElement('canvas');
   tc.width = W; tc.height = H;
   var ctx = tc.getContext('2d');
-
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, W, H);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#fff';
-
   var cx   = W/2;
   var tyY  = H*0.380;
   var sepY = H*0.520;
   var suY  = H*0.620;
-
-  // ── FOBOS — semibold, compatto, tracking quasi nullo ──
   var titleTrack = 4;
   ctx.font = '600 196px ' + SYS;
   ctx.save(); ctx.globalAlpha=0.09; ctx.filter='blur(34px)'; drawTracked(ctx,'FOBOS',cx,tyY,titleTrack); ctx.restore();
   ctx.save(); ctx.globalAlpha=0.20; ctx.filter='blur(15px)'; drawTracked(ctx,'FOBOS',cx,tyY,titleTrack); ctx.restore();
   ctx.save(); ctx.globalAlpha=0.42; ctx.filter='blur(5px)';  drawTracked(ctx,'FOBOS',cx,tyY,titleTrack); ctx.restore();
   ctx.save(); ctx.globalAlpha=1.00; ctx.filter='none';       drawTracked(ctx,'FOBOS',cx,tyY,titleTrack); ctx.restore();
-
-  // ── Linea decorativa sottilissima con gradiente ──
   ctx.save();
   var lineW = 150;
   var g = ctx.createLinearGradient(cx-lineW, sepY, cx+lineW, sepY);
@@ -420,15 +313,12 @@ function buildTextTexture(existing) {
   ctx.strokeStyle = g; ctx.lineWidth = 1.0;
   ctx.beginPath(); ctx.moveTo(cx-lineW,sepY); ctx.lineTo(cx+lineW,sepY); ctx.stroke();
   ctx.restore();
-
-  // ── Sottotitolo — regular, tracking minimo ──
   var sub = 'un server di test di Industree Hub';
   var subTrack = 3;
   ctx.font = '400 30px ' + SYS;
   ctx.save(); ctx.globalAlpha=0.13; ctx.filter='blur(12px)'; drawTracked(ctx,sub,cx,suY,subTrack); ctx.restore();
   ctx.save(); ctx.globalAlpha=0.38; ctx.filter='blur(3px)';  drawTracked(ctx,sub,cx,suY,subTrack); ctx.restore();
   ctx.save(); ctx.globalAlpha=0.92; ctx.filter='none';       drawTracked(ctx,sub,cx,suY,subTrack); ctx.restore();
-
   var tex = existing || gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
@@ -439,40 +329,27 @@ function buildTextTexture(existing) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   return tex;
 }
-
 var textTex = buildTextTexture();
-// Ricostruisce la texture quando i font di sistema sono pienamente pronti
-// (metriche stabili) — su Apple garantisce SF Pro renderizzato correttamente
 if (document.fonts && document.fonts.ready) {
   document.fonts.ready.then(function(){ buildTextTexture(textTex); });
 }
 gl.activeTexture(gl.TEXTURE0);
 gl.bindTexture(gl.TEXTURE_2D, textTex);
 gl.uniform1i(U.text, 0);
-
-// ═══════════════════════════════════════════════
-// RESIZE
-// ═══════════════════════════════════════════════
 function resize() {
   var dpr = Math.min(window.devicePixelRatio || 1, 1.5);
   canvas.width  = Math.round(window.innerWidth  * dpr);
   canvas.height = Math.round(window.innerHeight * dpr);
   gl.viewport(0, 0, canvas.width, canvas.height);
   gl.uniform2f(U.res, canvas.width, canvas.height);
-  // Costanti per-frame precalcolate su CPU (prima erano per-pixel)
   var ar = canvas.width / canvas.height;
   gl.uniform1f(U.ar, ar);
   gl.uniform1f(U.fitT, Math.min(ar/2.0, 1.0) * 1.42);
 }
 window.addEventListener('resize', resize, { passive: true });
 resize();
-
-// ═══════════════════════════════════════════════
-// INPUT
-// ═══════════════════════════════════════════════
 var tx=0.5, ty=0.5, sx=0.5, sy=0.5;
 var interact=0.0, lastMove=-1e9, isActive=false;
-
 function onMove(x, y) {
   var rc = canvas.getBoundingClientRect();
   tx = (x - rc.left)/rc.width;
@@ -485,33 +362,22 @@ window.addEventListener('mouseleave', function(){  isActive=false; }, {passive:t
 window.addEventListener('touchstart', function(e){ onMove(e.touches[0].clientX,e.touches[0].clientY); }, {passive:true});
 window.addEventListener('touchmove',  function(e){ e.preventDefault(); onMove(e.touches[0].clientX,e.touches[0].clientY); }, {passive:false});
 window.addEventListener('touchend',   function(){  isActive=false; }, {passive:true});
-
-// ═══════════════════════════════════════════════
-// RENDER LOOP
-// ═══════════════════════════════════════════════
 var startT = performance.now();
 var prevT  = startT;
-var elapsed  = 0.0;   // tempo globale
-var warpTime = 0.0;   // tempo del background, accelera in interazione
-
+var elapsed  = 0.0;
+var warpTime = 0.0;
 function render(now) {
   requestAnimationFrame(render);
   var dt = Math.min((now - prevT)*0.001, 0.05);
   prevT = now;
   elapsed += dt;
-
-  var alpha = 1.0 - Math.exp(-3.6*dt);  // lerp setoso, lento e languido
+  var alpha = 1.0 - Math.exp(-3.6*dt);
   sx += (tx - sx)*alpha;
   sy += (ty - sy)*alpha;
-
   var moving = isActive && (now - lastMove) < 120;
-  if (moving) interact = Math.min(1.0, interact + dt*1.5);   // emersione lenta
-  else        interact = Math.max(0.0, interact - dt*0.22);  // dissolvenza lenta
-
-  // Il background scorre un po' più veloce durante l'interazione (integrato →
-  // nessuno scatto di fase quando interact cambia)
+  if (moving) interact = Math.min(1.0, interact + dt*1.5);
+  else        interact = Math.max(0.0, interact - dt*0.22);
   warpTime += dt * (1.0 + interact*0.85);
-
   gl.uniform1f(U.time,     elapsed);
   gl.uniform1f(U.warpTime, warpTime);
   gl.uniform2f(U.mouse,    sx, sy);
@@ -519,7 +385,6 @@ function render(now) {
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 requestAnimationFrame(render);
-
 }());
 </script>
 </body>
