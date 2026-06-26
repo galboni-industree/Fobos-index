@@ -153,22 +153,27 @@ var FS = [
 '  vec3 copper  = vec3(0.40, 0.20, 0.11);',
 '  vec3 crimson = vec3(0.34, 0.06, 0.05);',
 '  vec3 sheenCol = mix(crimson, copper, irid);',
-'  col += sheenCol * sheen * smoothstep(0.45,0.95,silk) * (1.0 - u_interact*0.6);',
+'  col += sheenCol * sheen * smoothstep(0.45,0.95,silk) * (1.0 - u_interact*0.25);',
 
 // ─── BANDA SATINATA che scorre lentissima ────
 // Luce di studio che attraversa il tessuto — direzione random ad ogni load
 // (u_bdir e fase precalcolati su CPU dal seed)
 '  float bandCoord = dot(uv, u_bdir) - t*0.009;',
 '  float band = pow(0.5+0.5*sin(bandCoord*3.1416 + u_seed.y*6.2831), 2.2);',
-'  col += sheenCol * band * sheen * 0.5 * (1.0 - u_interact*0.6);',
+'  col += sheenCol * band * sheen * 0.5 * (1.0 - u_interact*0.25);',
 
 // ─── BRACE ROSSA DIFFUSA (liscia, respira) ───
 // Vive nelle creste della seta, pulsazione ipnotica con fase random
 '  float breath = 0.55 + 0.45*sin(t*0.13 + silk*4.0 + u_seed.x*6.2831);',
 '  float emberMask = smoothstep(0.55, 0.95, silk);',
-'  col += u_emberCol * emberMask * breath * 0.40 * (1.0 - u_interact*0.78);',
-// Bagliore caldo atmosferico globale
-'  col += vec3(0.030, 0.006, 0.004) * silk * (1.0 - u_interact*0.7);',
+// In interazione la brace si ACCENDE a fuoco: più intensa, più calda, con guizzo
+'  float flick = 0.80 + 0.20*sin(t*2.3 + silk*8.0)*sin(t*1.7 + silk*5.0);',
+'  vec3 fireCol = vec3(1.0, 0.40, 0.075);',                       // arancio incandescente
+'  vec3 burnCol = mix(u_emberCol, fireCol, u_interact*0.82);',    // rosso cupo → fuoco
+'  float emberStr = emberMask * breath * (0.40 + u_interact*1.25*flick);',
+'  col += burnCol * emberStr;',
+// Bagliore caldo atmosferico, intensificato dal fuoco durante l\'interazione
+'  col += vec3(0.030, 0.006, 0.004) * silk * (1.0 + u_interact*0.6);',
 
 // ─── LUCE BLU LIQUIDA (interazione) ──────────
 // Colori luce (servono anche al glow del testo → fuori dal branch)
