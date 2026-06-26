@@ -163,18 +163,23 @@ var FS = [
 '  float ir2 = ir*ir;',
 '  float ir4 = ir2*ir2;',
 
-// La posizione del campione viene spinta dal flow field →
-// la luce cola nelle pieghe come inchiostro, non un cerchio.
-// Doppio livello di warp (q e r) → bordo organico, tentacoli morbidi
-'  vec2 inkOffset = ((r-0.5)*0.26 + (q-0.5)*0.14) * (0.5 + ir);',
+// FLUSSO TEMPORALE DEDICATO ALLA LUCE → illuminazione fluida.
+// Più vivo della seta (che resta lentissima): i bordi ondeggiano e colano.
+'  vec2 lflow = vec2(',
+'    flow(p*0.85 + vec2( t*0.060, -t*0.018) + 11.3),',
+'    flow(p*0.85 + vec2(-t*0.022,  t*0.055) + 23.7)',
+'  ) - 0.5;',
+// La posizione del campione viene spinta dal flusso → la luce cola come
+// inchiostro vivo, non un cerchio. Combina flusso animato + warp della seta.
+'  vec2 inkOffset = (lflow*0.30 + (r-0.5)*0.16) * (0.45 + ir);',
 '  vec2 lp = auv + inkOffset;',
 '  float dist = length(lp - amouse);',
 
 // Solo luce DIFFUSA: nessun nucleo stretto/hotspot.
-// Raggio grande già a riposo, cresce verso l'invasione dello schermo.
-'  float lR = 0.30 + ir2*0.75;',
-// Modulazione morbida del raggio col flow → bordo organico, mai un punto
-'  float lRm = lR * (0.85 + 0.30*silk);',
+// Raggio grande già a riposo, con respiro morbido che lo fa pulsare.
+'  float lR = (0.30 + ir2*0.75) * (1.0 + 0.06*sin(t*0.45 + silk*3.0));',
+// Modulazione morbida del raggio col flusso vivo → bordo organico, mai un punto
+'  float lRm = lR * (0.85 + 0.30*silk + 0.10*lflow.x);',
 // Gaussiana ampia (peso maggiore) + alone ancora più largo, nessun picco netto
 '  float glow = exp(-dist*dist / (lRm*lRm + 0.0001));',
 '  float wide = exp(-dist*dist / (lR*lR*3.5 + 0.0001));',
