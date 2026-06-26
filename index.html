@@ -52,6 +52,7 @@ var FS = [
 'uniform vec2  u_mouse;',
 'uniform float u_interact;',
 'uniform vec2  u_res;',
+'uniform vec2  u_seed;',    // random per ogni caricamento
 'uniform sampler2D u_text;',
 
 // ─── Value noise SMOOTH (quintic) — niente grana ───
@@ -102,7 +103,7 @@ var FS = [
 
 // ─── DOMAIN WARP doppio (pieghe di raso) ──────
 // Movimento idle quasi nullo: coefficienti minuscoli
-'  vec2 p = uv * vec2(2.6*ar, 2.6);',
+'  vec2 p = uv * vec2(2.6*ar, 2.6) + u_seed;',   // offset random → pieghe diverse ad ogni load
 '  vec2 q = vec2(',
 '    flow(p + vec2(0.0, 0.0) + t*0.008),',
 '    flow(p + vec2(5.2, 1.3) - t*0.006)',
@@ -139,16 +140,20 @@ var FS = [
 '  col += sheenCol * sheen * smoothstep(0.45,0.95,silk) * (1.0 - u_interact*0.6);',
 
 // ─── BANDA SATINATA che scorre lentissima ────
-// Luce di studio che attraversa il tessuto — moto ipnotico, ampio
-'  float bandCoord = uv.x*0.85 + uv.y*0.55 - t*0.009;',
-'  float band = pow(0.5+0.5*sin(bandCoord*3.1416), 2.2);',
+// Luce di studio che attraversa il tessuto — direzione random ad ogni load
+'  float bang = u_seed.x*1.7 + u_seed.y*0.9;',
+'  vec2 bdir = normalize(vec2(cos(bang), sin(bang)) + 0.0001);',
+'  float bandCoord = dot(uv, bdir) - t*0.009;',
+'  float band = pow(0.5+0.5*sin(bandCoord*3.1416 + u_seed.y*6.2831), 2.2);',
 '  col += sheenCol * band * sheen * 0.5 * (1.0 - u_interact*0.6);',
 
 // ─── BRACE ROSSA DIFFUSA (liscia, respira) ───
-// Vive nelle creste della seta, pulsazione ipnotica lentissima
-'  float breath = 0.55 + 0.45*sin(t*0.13 + silk*4.0);',
+// Vive nelle creste della seta, pulsazione ipnotica con fase random
+'  float breath = 0.55 + 0.45*sin(t*0.13 + silk*4.0 + u_seed.x*6.2831);',
 '  float emberMask = smoothstep(0.55, 0.95, silk);',
-'  vec3 emberCol = vec3(0.50, 0.090, 0.032);',
+// Tinta calda lievemente variabile ad ogni load (cremisi ↔ rosso-arancio)
+'  float warmth = 0.5 + 0.5*sin(u_seed.x*2.3 + u_seed.y*1.1);',
+'  vec3 emberCol = mix(vec3(0.46,0.070,0.045), vec3(0.55,0.110,0.022), warmth);',
 '  col += emberCol * emberMask * breath * 0.40 * (1.0 - u_interact*0.78);',
 // Bagliore caldo atmosferico globale
 '  col += vec3(0.030, 0.006, 0.004) * silk * (1.0 - u_interact*0.7);',
@@ -299,8 +304,14 @@ var U = {
   mouse:    gl.getUniformLocation(prog,'u_mouse'),
   interact: gl.getUniformLocation(prog,'u_interact'),
   res:      gl.getUniformLocation(prog,'u_res'),
+  seed:     gl.getUniformLocation(prog,'u_seed'),
   text:     gl.getUniformLocation(prog,'u_text')
 };
+
+// Seed random per ogni caricamento → composizione sempre diversa
+var seedX = Math.random()*1000.0;
+var seedY = Math.random()*1000.0;
+gl.uniform2f(U.seed, seedX, seedY);
 
 // ═══════════════════════════════════════════════
 // TEXTURE TESTO — cascata di font di sistema moderni
