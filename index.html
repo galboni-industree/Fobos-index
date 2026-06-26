@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="description" content="Fobos, un server di test di Industree Hub">
+<title>Fobos — Industree Hub</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #060402;
+    overflow: hidden;
+    cursor: none;
+  }
+  canvas {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  #fallback {
+    display: none;
+    position: fixed;
+    inset: 0;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 0.75rem;
+    background: #060402;
+    color: #3a3028;
+    font: 300 1rem/1.6 "Helvetica Neue", Helvetica, Arial, sans-serif;
+    text-align: center;
+  }
+  #fallback strong {
+    font-weight: 700;
+    font-size: 2rem;
+    letter-spacing: 0.25em;
+    color: #5a4838;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="fallback">
+  <strong>FOBOS</strong>
+  <span>un server di test di Industree Hub</span>
+</div>
+
+<script>
+(function () {
+'use strict';
+
+// ─────────────────────────────────────────────
+// VERTEX SHADER
+// ─────────────────────────────────────────────
+var VS = [
+'attribute vec2 a_pos;',
+'varying vec2 v_uv;',
+'void main() {',
+'  v_uv = a_pos * 0.5 + 0.5;',
+'  gl_Position = vec4(a_pos, 0.0, 1.0);',
+'}'
+].join('\n');
+
+// ─────────────────────────────────────────────
+// FRAGMENT SHADER
+// ─────────────────────────────────────────────
+var FS = [
+'precision highp float;',
+'varying vec2 v_uv;',
+'uniform float u_time;',
+'uniform vec2  u_mouse;',
+'uniform float u_interact;',
+'uniform vec2  u_res;',
+'uniform sampler2D u_text;',
+
+// ── Hash / Noise ──────────────────────────────
+'vec2 h2(vec2 p) {',
+'  p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));',
+'  return fract(sin(p) * 43758.5453) * 2.0 - 1.0;',
+'}',
+
+'float h1(vec2 p) {',
+'  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);',
+'}',
+
+// Cubic-smoothed gradient noise
+'float gn(vec2 p) {',
+'  vec2 i = floor(p);',
+'  vec2 f = fract(p);',
+'  vec2 u = f * f * (3.0 - 2.0 * f);',
+'  float a = dot(h2(i + vec2(0.0, 0.0)), f - vec2(0.0, 0.0));',
+'  float b = dot(h2(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0));',
+'  float c = dot(h2(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0));',
+'  float d = dot(h2(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0));',
+'  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);',
+'}',
+
+// FBM 6 ottave, unrolled per GLSL ES 1.0
+'float fbm(vec2 p) {',
+'  float v = 0.0;',
+'  v += 0.5000 * gn(p);         p *= 2.07; p += vec2(1.7, 9.2);',
+'  v += 0.2500 * gn(p);         p *= 2.07; p += vec2(8.3, 2.8);',
+'  v += 0.1250 * gn(p);         p *= 2.07; p += vec2(5.1, 4.6);',
+'  v += 0.0625 * gn(p);         p *= 2.07; p += vec2(3.2, 7.9);',
+'  v += 0.0313 * gn(p);         p *= 2.07; p += vec2(6.8, 1.3);',
+'  v += 0.0156 * gn(p);',
+'  return v * 0.5 + 0.5;',
+'}',
+
+// ── Main ──────────────────────────────────────
+'void main() {',
+'  vec2 uv = v_uv;',
+'  float ar = u_res.x / u_res.y;',
+
+// Coordinate aspect-corrected centrate a zero (per distanze)
+'  vec2 auv    = vec2((uv.x - 0.5) * ar, uv.y - 0.5);',
+'  vec2 amouse = vec2((u_mouse.x - 0.5) * ar, u_mouse.y - 0.5);',
+
+'  float t = u_time;',
+
+// ─── DOMAIN WARP sinusoidale (economico, organico) ───
+'  float wt = t * 0.014;',
+'  vec2 warp = vec2(',
+'    sin(uv.y * 6.1 + wt * 1.1) * 0.013 + sin(uv.x * 4.3 - wt * 0.7) * 0.008,',
+'    cos(uv.x * 5.7 + wt * 0.9) * 0.013 + cos(uv.y * 3.8 + wt * 1.3) * 0.008',
+'  );',
+'  vec2 wu = uv + warp;',
+
+// ─── BASE CARBONIOSA ───────────────────────────
+// 3 campionamenti FBM a frequenze diverse
+'  float n0 = fbm(wu * 9.0  + vec2(-t * 0.007,  t * 0.011));',
+'  float n1 = fbm(wu * 18.0 + vec2( t * 0.019, -t * 0.013) + vec2(5.3, 2.1));',
+'  float n2 = fbm(wu * 36.0 + vec2(-t * 0.021,  t * 0.017) + vec2(9.1, 6.4));',
+
+'  float grain = n0 * 0.60 + n1 * 0.28 + n2 * 0.12;',
+
+// Palette: ombra profonda → carbone → cenere
+'  vec3 shadow  = vec3(0.026, 0.020, 0.016);',
+'  vec3 carbon  = vec3(0.108, 0.090, 0.072);',
+'  vec3 ash     = vec3(0.168, 0.145, 0.118);',
+
+'  vec3 base = mix(shadow, carbon, smoothstep(0.0, 0.58, grain));',
+'  base = mix(base, ash, smoothstep(0.55, 0.88, grain) * 0.45);',
+
+// ─── BRACI ROSSASTRE ────────────────────────────
+// Strato FBM separato, deriva lenta e indipendente
+'  float en0 = fbm(uv * 5.5 + vec2( t * 0.013, -t * 0.009) + vec2(2.3, 8.1));',
+'  float en1 = fbm(uv * 11.0 + vec2(-t * 0.011,  t * 0.007) + vec2(7.8, 3.4));',
+'  float eField = en0 * 0.65 + en1 * 0.35;',
+
+'  float eMask = smoothstep(0.58, 0.79, eField);',
+
+// Battito organico: prodotto di due sinusoidi a frequenze diverse
+'  float ePulse = 0.38 + 0.62 * smoothstep(-1.0, 1.0,',
+'    sin(t * 0.87 + en0 * 11.3) * sin(t * 0.63 + en1 * 7.9)',
+'  );',
+
+// Cremisi scuro/infrarosso, non arancio fuoco
+'  vec3 emberCol = vec3(0.44, 0.058, 0.012);',
+// Fades quando la luce blu arriva
+'  float emberStr = eMask * ePulse * (1.0 - u_interact * 0.75);',
+'  base += emberCol * emberStr * 0.38;',
+
+// ─── LUCE BLU (interazione) ─────────────────────
+'  float dist = length(auv - amouse);',
+
+'  float ir  = u_interact;',
+'  float ir2 = ir * ir;',
+'  float ir4 = ir2 * ir2;',
+
+// Radius cresce quadraticamente: piccolo → invade
+'  float lR = 0.06 + ir2 * 0.55;',
+
+// Gaussiana primaria centrata sul mouse
+'  float gauss = exp(-dist * dist / (lR * lR + 0.0001));',
+
+// Halo morbido: gaussiana più larga (2.5x), 40% intensità
+'  float haloR = lR * 2.5;',
+'  float halo  = exp(-dist * dist / (haloR * haloR + 0.0001)) * 0.42;',
+
+// Ambient fill: invade lo schermo con interazione sostenuta
+'  float cDist = length(auv * 0.6);',
+'  float ambient = ir4 * 0.55 * exp(-cDist * 3.2);',
+
+// Luce totale: massimo tra le componenti, scalata per u_interact
+'  float rawLight = max(max(gauss, halo), ambient);',
+'  float totalLight = rawLight * ir;',
+
+// Gradiente colore luce: bianco-ghiaccio → blu elettrico → blu oceano
+'  float lr = clamp(dist / max(lR, 0.01), 0.0, 2.0);',
+'  vec3 lCore  = vec3(0.88, 0.94, 1.00);',
+'  vec3 lMid   = vec3(0.20, 0.56, 1.00);',
+'  vec3 lOuter = vec3(0.05, 0.13, 0.42);',
+'  vec3 lAmb   = vec3(0.03, 0.07, 0.26);',
+
+'  vec3 lightCol = mix(lOuter, lMid,  smoothstep(1.0, 0.30, lr));',
+'  lightCol      = mix(lightCol, lCore, smoothstep(0.30, 0.0, lr));',
+
+// Blend base con luce
+'  vec3 col = mix(base, lightCol, clamp(totalLight * 1.15, 0.0, 1.0));',
+
+// Bloom additivo (contributo fisicamente plausibile)
+'  col += lightCol * totalLight * 0.48 * (1.0 - totalLight * 0.55);',
+
+// Tinta ambientale atmosferica (bordi schermo al buio)
+'  col += lAmb * ambient * 0.7;',
+
+// ─── REVEAL TESTO ──────────────────────────────
+'  float textMask = texture2D(u_text, uv).r;',
+
+// Testo emerge sopra una soglia di luce
+'  float textReveal = smoothstep(0.04, 0.42, totalLight) * textMask;',
+
+// Colore testo: bianco-freddo puro
+'  vec3 textCol = mix(lCore, vec3(1.0), 0.55);',
+'  col = mix(col, textCol, textReveal * 0.94);',
+
+// Glow attorno al testo rivelato
+'  col += lMid * smoothstep(0.02, 0.30, totalLight) * textMask * 0.28;',
+
+// ─── POST-PROCESS ──────────────────────────────
+// Vignette radiale
+'  float vd = length(uv - 0.5) * 1.95;',
+'  float vig = 1.0 - smoothstep(0.35, 1.15, vd);',
+'  col *= 0.48 + 0.52 * vig;',
+
+// Film grain per frame — sottilissimo, evita banding
+'  float gr = h1(uv + fract(t * 1.31) + fract(t * 0.73) * 3.71) - 0.5;',
+'  col += gr * 0.020;',
+
+'  gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);',
+'}'
+].join('\n');
+
+// ─────────────────────────────────────────────
+// BOOTSTRAP WebGL
+// ─────────────────────────────────────────────
+var canvas = document.getElementById('c');
+var gl = (
+  canvas.getContext('webgl', { antialias: false, alpha: false, depth: false, stencil: false }) ||
+  canvas.getContext('experimental-webgl', { antialias: false, alpha: false })
+);
+
+if (!gl) {
+  canvas.style.display = 'none';
+  document.getElementById('fallback').style.display = 'flex';
+  return;
+}
+
+// Compila uno shader
+function compile(type, src) {
+  var s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    console.error('[shader]', gl.getShaderInfoLog(s));
+    return null;
+  }
+  return s;
+}
+
+var prog = gl.createProgram();
+var vs = compile(gl.VERTEX_SHADER, VS);
+var fs = compile(gl.FRAGMENT_SHADER, FS);
+if (!vs || !fs) {
+  canvas.style.display = 'none';
+  document.getElementById('fallback').style.display = 'flex';
+  return;
+}
+gl.attachShader(prog, vs);
+gl.attachShader(prog, fs);
+gl.linkProgram(prog);
+if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+  console.error('[program]', gl.getProgramInfoLog(prog));
+  canvas.style.display = 'none';
+  document.getElementById('fallback').style.display = 'flex';
+  return;
+}
+gl.useProgram(prog);
+
+// Full-screen quad: due triangoli come TRIANGLE_STRIP
+var vbo = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+var aPos = gl.getAttribLocation(prog, 'a_pos');
+gl.enableVertexAttribArray(aPos);
+gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+// Uniform locations
+var U = {
+  time:     gl.getUniformLocation(prog, 'u_time'),
+  mouse:    gl.getUniformLocation(prog, 'u_mouse'),
+  interact: gl.getUniformLocation(prog, 'u_interact'),
+  res:      gl.getUniformLocation(prog, 'u_res'),
+  text:     gl.getUniformLocation(prog, 'u_text')
+};
+
+// ─────────────────────────────────────────────
+// TEXTURE TESTO (Canvas 2D → WebGL)
+// ─────────────────────────────────────────────
+function buildTextTexture() {
+  var W = 2048, H = 1024;
+  var tc = document.createElement('canvas');
+  tc.width = W; tc.height = H;
+  var ctx = tc.getContext('2d');
+
+  // Sfondo nero
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  var titleFont = '800 192px "Helvetica Neue", Helvetica, Arial, sans-serif';
+  var subFont   = '300 31px "Helvetica Neue", Helvetica, Arial, sans-serif';
+  var cx = W / 2;
+  var titleY = H * 0.385;
+  var subY   = H * 0.645;
+  var sepY   = H * 0.535;
+
+  // ── FOBOS: glow pre-baked (3 passate) ──
+  ctx.font = titleFont;
+  ctx.fillStyle = '#fff';
+
+  // Halo esterno
+  ctx.save();
+  ctx.globalAlpha = 0.18;
+  ctx.filter = 'blur(18px)';
+  ctx.fillText('FOBOS', cx, titleY);
+  ctx.restore();
+
+  // Alone medio
+  ctx.save();
+  ctx.globalAlpha = 0.40;
+  ctx.filter = 'blur(7px)';
+  ctx.fillText('FOBOS', cx, titleY);
+  ctx.restore();
+
+  // Testo nitido
+  ctx.save();
+  ctx.globalAlpha = 1.0;
+  ctx.filter = 'none';
+  ctx.fillText('FOBOS', cx, titleY);
+  ctx.restore();
+
+  // ── Linea separatrice ──
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(cx - 108, sepY);
+  ctx.lineTo(cx + 108, sepY);
+  ctx.stroke();
+  ctx.restore();
+
+  // ── SUBTITLE ──
+  ctx.font = subFont;
+  ctx.fillStyle = '#fff';
+
+  ctx.save();
+  ctx.globalAlpha = 0.20;
+  ctx.filter = 'blur(8px)';
+  ctx.fillText('un server di test di Industree Hub', cx, subY);
+  ctx.restore();
+
+  ctx.save();
+  ctx.globalAlpha = 0.88;
+  ctx.filter = 'none';
+  ctx.fillText('un server di test di Industree Hub', cx, subY);
+  ctx.restore();
+
+  // Upload a WebGL
+  var tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, tc);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  return tex;
+}
+
+var textTex = buildTextTexture();
+gl.activeTexture(gl.TEXTURE0);
+gl.bindTexture(gl.TEXTURE_2D, textTex);
+gl.uniform1i(U.text, 0);
+
+// ─────────────────────────────────────────────
+// RESIZE
+// ─────────────────────────────────────────────
+function resize() {
+  var dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+  canvas.width  = Math.round(window.innerWidth  * dpr);
+  canvas.height = Math.round(window.innerHeight * dpr);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.uniform2f(U.res, canvas.width, canvas.height);
+}
+window.addEventListener('resize', resize, { passive: true });
+resize();
+
+// ─────────────────────────────────────────────
+// INPUT (mouse + touch)
+// ─────────────────────────────────────────────
+var tx = 0.5, ty = 0.5;   // target
+var sx = 0.5, sy = 0.5;   // smoothed
+var interact  = 0.0;
+var lastMove  = -1e9;
+var isActive  = false;
+
+function onMove(x, y) {
+  var rect = canvas.getBoundingClientRect();
+  tx = (x - rect.left)  / rect.width;
+  ty = 1.0 - (y - rect.top) / rect.height;
+  lastMove = performance.now();
+  isActive = true;
+}
+
+window.addEventListener('mousemove', function (e) {
+  onMove(e.clientX, e.clientY);
+}, { passive: true });
+
+window.addEventListener('mouseleave', function () {
+  isActive = false;
+}, { passive: true });
+
+window.addEventListener('touchstart', function (e) {
+  onMove(e.touches[0].clientX, e.touches[0].clientY);
+}, { passive: true });
+
+window.addEventListener('touchmove', function (e) {
+  e.preventDefault();
+  onMove(e.touches[0].clientX, e.touches[0].clientY);
+}, { passive: false });
+
+window.addEventListener('touchend', function () {
+  isActive = false;
+}, { passive: true });
+
+// ─────────────────────────────────────────────
+// RENDER LOOP
+// ─────────────────────────────────────────────
+var startT = performance.now();
+var prevT  = startT;
+
+function render(now) {
+  requestAnimationFrame(render);
+
+  var dt = Math.min((now - prevT) * 0.001, 0.05);  // cap a 50ms
+  prevT = now;
+  var elapsed = (now - startT) * 0.001;
+
+  // Exponential lerp mouse (fluido, non meccanico)
+  var alpha = 1.0 - Math.exp(-8.0 * dt);
+  sx += (tx - sx) * alpha;
+  sy += (ty - sy) * alpha;
+
+  // Accumulo interazione
+  var moving = isActive && (now - lastMove) < 90;  // dead zone 90ms
+  if (moving) {
+    interact = Math.min(1.0, interact + dt * 3.0);
+  } else {
+    interact = Math.max(0.0, interact - dt * 0.4);
+  }
+
+  gl.uniform1f(U.time,     elapsed);
+  gl.uniform2f(U.mouse,    sx, sy);
+  gl.uniform1f(U.interact, interact);
+
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+requestAnimationFrame(render);
+
+}());
+</script>
+</body>
+</html>
