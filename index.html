@@ -168,9 +168,9 @@ var FS = [
 '  float emberMask = smoothstep(0.55, 0.95, silk);',
 // In interazione la brace si ACCENDE a fuoco: più intensa, più calda, con guizzo
 '  float flick = 0.80 + 0.20*sin(t*2.3 + silk*8.0)*sin(t*1.7 + silk*5.0);',
-'  vec3 fireCol = vec3(1.0, 0.40, 0.075);',                       // arancio incandescente
-'  vec3 burnCol = mix(u_emberCol, fireCol, u_interact*0.82);',    // rosso cupo → fuoco
-'  float emberStr = emberMask * breath * (0.40 + u_interact*1.25*flick);',
+'  vec3 fireCol = vec3(0.80, 0.14, 0.022);',                      // rosso fuoco scuro, sanguigno
+'  vec3 burnCol = mix(u_emberCol, fireCol, u_interact*0.82);',    // rosso cupo → fuoco scuro
+'  float emberStr = emberMask * breath * (0.40 + u_interact*2.5*flick);',
 '  col += burnCol * emberStr;',
 // Bagliore caldo atmosferico, intensificato dal fuoco durante l\'interazione
 '  col += vec3(0.030, 0.006, 0.004) * silk * (1.0 + u_interact*0.6);',
