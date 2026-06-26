@@ -7,16 +7,16 @@
 <title>Fobos — Industree Hub</title>
 <style>
   *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { width: 100%; height: 100%; background: #03020100; overflow: hidden; cursor: none; }
+  html, body { width: 100%; height: 100%; background: #060304; overflow: hidden; cursor: none; }
   canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
   #fallback {
     display: none; position: fixed; inset: 0;
     align-items: center; justify-content: center; flex-direction: column; gap: 1rem;
-    background: #060402;
+    background: #060304;
     font: 300 1rem/1.8 "Helvetica Neue", Helvetica, Arial, sans-serif;
-    text-align: center; color: #3a2e20;
+    text-align: center; color: #3a2a26;
   }
-  #fallback strong { font-size: 2.5rem; font-weight: 800; letter-spacing: .3em; color: #5a3818; }
+  #fallback strong { font-size: 2.5rem; font-weight: 800; letter-spacing: .3em; color: #5a342c; }
 </style>
 </head>
 <body>
@@ -43,77 +43,53 @@ var VS = [
 ].join('\n');
 
 // ═══════════════════════════════════════════════
-// FRAGMENT — tutto il visual
+// FRAGMENT — seta / inchiostro liquido
 // ═══════════════════════════════════════════════
 var FS = [
 'precision highp float;',
 'varying vec2 v_uv;',
 'uniform float u_time;',
-'uniform vec2  u_mouse;',      // smoothed mouse, normalised 0-1
-'uniform float u_interact;',   // 0→1 accumulated interaction
-'uniform vec2  u_res;',        // canvas pixel size
-'uniform vec3  u_ripple;',     // (mouseX, mouseY, age_sec)
+'uniform vec2  u_mouse;',
+'uniform float u_interact;',
+'uniform vec2  u_res;',
 'uniform sampler2D u_text;',
 
-// ─── HASH ────────────────────────────────────
-'vec2 h2(vec2 p){',
-'  p = vec2(dot(p,vec2(127.1,311.7)), dot(p,vec2(269.5,183.3)));',
-'  return fract(sin(p)*43758.5453)*2.0-1.0;',
+// ─── Value noise SMOOTH (quintic) — niente grana ───
+'float hash(vec2 p){',
+'  p = fract(p*vec2(123.34, 456.21));',
+'  p += dot(p, p+45.32);',
+'  return fract(p.x*p.y);',
 '}',
-'float h1(vec2 p){',
-'  return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);',
-'}',
-
-// ─── GRADIENT NOISE (cubic Hermite) ─────────
-'float gn(vec2 p){',
+// Quintic smoothstep → derivata continua → gradienti vellutati
+'float vnoise(vec2 p){',
 '  vec2 i=floor(p), f=fract(p);',
-'  vec2 u=f*f*(3.0-2.0*f);',
-'  return mix(',
-'    mix(dot(h2(i+vec2(0,0)),f-vec2(0,0)), dot(h2(i+vec2(1,0)),f-vec2(1,0)), u.x),',
-'    mix(dot(h2(i+vec2(0,1)),f-vec2(0,1)), dot(h2(i+vec2(1,1)),f-vec2(1,1)), u.x),',
-'    u.y);',
+'  vec2 u=f*f*f*(f*(f*6.0-15.0)+10.0);',
+'  float a=hash(i+vec2(0,0));',
+'  float b=hash(i+vec2(1,0));',
+'  float c=hash(i+vec2(0,1));',
+'  float d=hash(i+vec2(1,1));',
+'  return mix(mix(a,b,u.x), mix(c,d,u.x), u.y);',
 '}',
 
-// FBM 6 ottave — texture principale
-'float fbm(vec2 p){',
+// FBM bassissima frequenza, sole 3 ottave — campo fluido, mai grana
+'float flow(vec2 p){',
 '  float v=0.0;',
-'  v+=0.5000*gn(p); p*=2.07; p+=vec2(1.7,9.2);',
-'  v+=0.2500*gn(p); p*=2.07; p+=vec2(8.3,2.8);',
-'  v+=0.1250*gn(p); p*=2.07; p+=vec2(5.1,4.6);',
-'  v+=0.0625*gn(p); p*=2.07; p+=vec2(3.2,7.9);',
-'  v+=0.0313*gn(p); p*=2.07; p+=vec2(6.8,1.3);',
-'  v+=0.0156*gn(p);',
-'  return v*0.5+0.5;',
+'  v += 0.60*vnoise(p);          p = p*1.9 + vec2(2.1, 8.3);',
+'  v += 0.30*vnoise(p);          p = p*1.9 + vec2(5.7, 1.2);',
+'  v += 0.10*vnoise(p);',
+'  return v;',
 '}',
 
-// FBM 3 ottave — warp e caustica (economico)
-'float fbm3(vec2 p){',
-'  float v=0.0;',
-'  v+=0.5000*gn(p); p*=2.07; p+=vec2(1.7,9.2);',
-'  v+=0.2500*gn(p); p*=2.07; p+=vec2(8.3,2.8);',
-'  v+=0.1250*gn(p);',
-'  return v*(4.0/3.5)*0.5+0.5;',
-'}',
-
-// ─── VORONOI ─────────────────────────────────
-// Ritorna (dist_al_più_vicino, dist_al_bordo_cella)
-'vec2 voronoi(vec2 p){',
-'  vec2 ip=floor(p), fp=fract(p);',
-'  float d1=8.0, d2=8.0;',
-'  for(int j=-1;j<=1;j++){',
-'    for(int i=-1;i<=1;i++){',
-'      vec2 g=vec2(float(i),float(j));',
-'      vec2 o=h2(ip+g)*0.5+0.5;',
-'      float d=dot(g+o-fp,g+o-fp);',
-'      if(d<d1){d2=d1;d1=d;}else if(d<d2){d2=d;}',
-'    }',
-'  }',
-'  return vec2(sqrt(d1), sqrt(d2)-sqrt(d1));',
-'}',
-
-// ─── ACES filmic tone mapping ─────────────────
+// ─── ACES filmic ─────────────────────────────
 'vec3 aces(vec3 x){',
 '  return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14),0.0,1.0);',
+'}',
+
+// Dither triangolare sotto-soglia (anti-banding, NON grana)
+'float dither(vec2 uv){',
+'  float r = hash(uv*vec2(311.7,127.1));',
+'  float g = hash(uv*vec2(269.5,183.3)+17.0);',
+'  return (r+g-1.0);',  // distribuzione triangolare [-1,1]
 '}',
 
 // ═══════════════════════════════════════════════
@@ -124,187 +100,106 @@ var FS = [
 '  vec2 amouse = vec2((u_mouse.x-0.5)*ar, u_mouse.y-0.5);',
 '  float t = u_time;',
 
-// ─── DOMAIN WARP FBM (non sinusoidale) ───────
-// Due strati FBM per il vettore di warp → texture genuinamente organica
-'  float wt = t*0.010;',
-'  float wx = fbm3(uv*3.5 + vec2(wt*1.1,  wt*0.7));',
-'  float wy = fbm3(uv*3.5 + vec2(wt*0.8, -wt*1.3) + 4.7);',
-'  vec2 wu = uv + vec2(wx-0.5, wy-0.5)*0.10;',
+// ─── DOMAIN WARP doppio (pieghe di raso) ──────
+// Movimento idle quasi nullo: coefficienti minuscoli
+'  vec2 p = uv * vec2(2.6*ar, 2.6);',
+'  vec2 q = vec2(',
+'    flow(p + vec2(0.0, 0.0) + t*0.018),',
+'    flow(p + vec2(5.2, 1.3) - t*0.014)',
+'  );',
+'  vec2 r = vec2(',
+'    flow(p + 3.0*q + vec2(1.7, 9.2) + t*0.022),',
+'    flow(p + 3.0*q + vec2(8.3, 2.8) - t*0.016)',
+'  );',
+'  float silk = flow(p + 2.4*r);',          // campo di altezza della seta
 
-// ─── GRANO PRINCIPALE ────────────────────────
-'  vec2 dA = vec2(-t*0.006, t*0.008);',
-'  float n0 = fbm(wu*8.0  + dA);',
-'  float n1 = fbm(wu*17.0 + vec2(t*0.016,-t*0.010) + vec2(5.3,2.1));',
-'  float n2 = fbm(wu*34.0 + vec2(-t*0.018,t*0.014) + vec2(9.1,6.4));',
-'  float grain = n0*0.58 + n1*0.29 + n2*0.13;',
+// Pendenza per lo sheen anisotropo
+'  float e = 0.0016;',
+'  float sx = flow(p+vec2(e,0.0)+2.4*r) - silk;',
+'  float sy = flow(p+vec2(0.0,e)+2.4*r) - silk;',
+'  vec2 slope = vec2(sx, sy)/e;',
 
-// Pseudo-normali dal gradiente del grano → specular
-'  float eps = 0.003;',
-'  float nR = fbm3((wu+vec2(eps,0.0))*8.0 + dA);',
-'  float nU = fbm3((wu+vec2(0.0,eps))*8.0 + dA);',
-'  vec3 nrm = normalize(vec3(-(nR-n0)/eps*0.5, -(nU-n0)/eps*0.5, 1.0));',
+// ─── PALETTE SETA (carbone → rosso-fumo) ─────
+'  vec3 deep   = vec3(0.024, 0.014, 0.012);',   // piega profonda
+'  vec3 carbon = vec3(0.075, 0.050, 0.046);',   // carbone
+'  vec3 smoke  = vec3(0.230, 0.075, 0.060);',   // rosso-fumo sulle creste
+'  vec3 col = mix(deep, carbon, smoothstep(0.30, 0.62, silk));',
+'  col = mix(col, smoke, smoothstep(0.60, 0.92, silk));',
 
-// ─── VORONOI — pattern a crepe ───────────────
-// Warp leggero prima del voronoi per crepe più organiche
-'  vec2 vwp = uv + vec2(wx-0.5,wy-0.5)*0.05;',
-'  vec2 vor = voronoi(vwp*4.2 + vec2(t*0.003,-t*0.002));',
-'  float edgeDist = vor.y;',
-// Maschera crepatura stretta (bordo netto) e alone morbido
-'  float crackEdge = 1.0 - smoothstep(0.0, 0.055, edgeDist);',
-'  float crackGlow = 1.0 - smoothstep(0.0, 0.20,  edgeDist);',
+// ─── SHEEN ANISOTROPO (il "setoso") ───────────
+// Highlight allungato lungo la direzione del flusso
+'  float sheenDir = slope.x*0.7 - slope.y*0.7;',
+'  float sheen = pow(clamp(0.5+0.5*sin(silk*7.0 + sheenDir*2.2), 0.0, 1.0), 3.5);',
+'  col += vec3(0.34, 0.12, 0.085) * sheen * smoothstep(0.45,0.95,silk) * (1.0 - u_interact*0.6);',
 
-// ─── PALETTE BASE (ossidiana scura) ──────────
-'  vec3 abyss   = vec3(0.008, 0.006, 0.004);',   // quasi nero
-'  vec3 carbon  = vec3(0.082, 0.065, 0.048);',   // carbone
-'  vec3 ash     = vec3(0.175, 0.145, 0.110);',   // cenere chiara
-'  vec3 base = mix(abyss,  carbon, smoothstep(0.22, 0.62, grain));',
-'  base = mix(base, ash,   smoothstep(0.58, 0.88, grain)*0.38);',
+// ─── BRACE ROSSA DIFFUSA (liscia, respira) ───
+// Vive nelle creste della seta, pulsazione ipnotica lentissima
+'  float breath = 0.55 + 0.45*sin(t*0.28 + silk*4.0);',
+'  float emberMask = smoothstep(0.55, 0.95, silk);',
+'  vec3 emberCol = vec3(0.48, 0.085, 0.030);',
+'  col += emberCol * emberMask * breath * 0.42 * (1.0 - u_interact*0.78);',
+// Bagliore caldo atmosferico globale
+'  col += vec3(0.030, 0.006, 0.004) * silk * (1.0 - u_interact*0.7);',
 
-// Scintille di mica (punti brillanti rarissimi)
-'  float mica = step(0.975, h1(floor(uv*220.0))) * h1(floor(uv*60.0+0.5));',
-'  base += vec3(0.40, 0.34, 0.26)*mica*0.8;',
-
-// ─── BRACE ROSSASTRE NELLE CREPE ─────────────
-// Strato ember con drift lento e indipendente
-'  float en0 = fbm(uv*5.0 + vec2( t*0.011,-t*0.008) + 2.3);',
-'  float en1 = fbm(uv*9.5 + vec2(-t*0.009, t*0.006) + 7.1);',
-'  float eField = en0*0.62 + en1*0.38;',
-
-// Battito organico: prodotto di due sinusoidi asincrone
-'  float ePulse = 0.32 + 0.68*smoothstep(-1.0,1.0,',
-'    sin(t*0.82+en0*14.0)*sin(t*0.57+en1*9.2));',
-
-// Brace concentrata sulle crepe (crackEdge + crackGlow)
-'  float emberStr = crackGlow * eField * ePulse * (1.0-u_interact*0.82);',
-
-// Gradiente brace: lava brillante al bordo → rosso profondo nell'alone
-'  vec3 lavaSeam = vec3(1.00, 0.18, 0.02);',
-'  vec3 emberDim = vec3(0.55, 0.06, 0.008);',
-'  vec3 emberCol = mix(emberDim, lavaSeam, crackEdge);',
-'  base += emberCol * emberStr * 0.72;',
-
-// Calore atmosferico globale tenuissimo
-'  base += vec3(0.038, 0.005, 0.001) * eField * (1.0-u_interact*0.7);',
-
-// ─── LUCE BLU (interazione) ──────────────────
-'  float dist = length(auv - amouse);',
+// ─── LUCE BLU LIQUIDA (interazione) ──────────
 '  float ir  = u_interact;',
 '  float ir2 = ir*ir;',
 '  float ir4 = ir2*ir2;',
 
-// Raggio cresce quadraticamente (piccolo scatto → invasione schermo)
-'  float lR = 0.05 + ir2*0.62;',
+// La posizione del campione viene spinta dal flow field →
+// la luce cola nelle pieghe come inchiostro, non un cerchio
+'  vec2 inkOffset = (r - 0.5) * 0.22 * (0.5 + ir);',
+'  vec2 lp = auv + inkOffset;',
+'  float dist = length(lp - amouse);',
 
-// Gaussiana primaria
-'  float gauss = exp(-dist*dist / (lR*lR + 0.0001));',
+// Raggio cresce quadraticamente: scintilla → invasione
+'  float lR = 0.05 + ir2*0.60;',
+'  float core = exp(-dist*dist / (lR*lR + 0.0001));',
+'  float halo = exp(-dist*dist / (lR*lR*9.0 + 0.0001)) * 0.40;',
 
-// Alone morbido (3× il radius, 35% intensità)
-'  float haloR = lR*3.2;',
-'  float halo  = exp(-dist*dist / (haloR*haloR + 0.0001))*0.35;',
+// Riempimento ambientale liscio dal centro
+'  float cDist = length(auv*0.5);',
+'  float ambient = ir4*0.60*exp(-cDist*2.4);',
 
-// Riempimento ambientale (invade schermo con interazione prolungata)
-'  float cDist = length(auv*0.45);',
-'  float ambient = ir4*0.65*exp(-cDist*2.5);',
+'  float light = max(max(core, halo), ambient) * ir;',
 
-// ─── ONDA RIPPLE al primo tocco ───────────────
-'  vec2 aRippleP = vec2((u_ripple.x-0.5)*ar, u_ripple.y-0.5);',
-'  float rDist = length(auv - aRippleP);',
-'  float rAge  = u_ripple.z;',
-'  float rRadius = rAge*0.42;',
-'  float rWidth = 0.05 + rAge*0.015;',
-'  float ring = exp(-pow(abs(rDist - rRadius)/rWidth, 2.0)*9.0);',
-'  float ripple = ring * exp(-rAge*1.6) * 0.80;',
+// ─── COLORE LUCE: ghiaccio → cobalto → abisso ─
+'  float lr = clamp(dist/max(lR,0.01), 0.0, 2.2);',
+'  vec3 ice    = vec3(0.918, 0.965, 1.000);',
+'  vec3 cobalt = vec3(0.162, 0.502, 1.000);',
+'  vec3 abyss  = vec3(0.039, 0.118, 0.353);',
+'  vec3 lightCol = mix(abyss, cobalt, smoothstep(1.4, 0.35, lr));',
+'  lightCol      = mix(lightCol, ice, smoothstep(0.35, 0.0, lr));',
 
-// Luce totale
-'  float rawL = max(max(gauss, halo), max(ambient, ripple*ir));',
-'  float totalLight = rawL*ir + ripple*(1.0-ir)*clamp(1.0-rAge*2.5,0.0,1.0);',
+// Blend morbido + bloom plausibile
+'  col = mix(col, lightCol, clamp(light*1.15, 0.0, 1.0));',
+'  col += lightCol * light * 0.55 * (1.0 - light*0.4);',
+'  col += abyss * ambient * 0.9;',
 
-// ─── COLORE LUCE ─────────────────────────────
-'  float lr = clamp(dist/max(lR,0.01), 0.0, 2.5);',
-'  vec3 lCore  = vec3(0.92, 0.97, 1.00);',   // bianco ghiaccio
-'  vec3 lMid   = vec3(0.16, 0.50, 1.00);',   // cobalto elettrico
-'  vec3 lOuter = vec3(0.04, 0.10, 0.44);',   // blu oceano
-'  vec3 lAmb   = vec3(0.02, 0.05, 0.20);',   // atmosfera blu scuro
-'  vec3 lRipple= vec3(0.10, 0.38, 0.95);',   // anello ripple
+// Riflesso satinato freddo sulla seta illuminata (sheen vira al blu)
+'  col += vec3(0.10,0.30,0.55) * sheen * light * 0.6;',
 
-'  vec3 lightCol = mix(lOuter, lMid, smoothstep(1.3, 0.35, lr));',
-'  lightCol       = mix(lightCol, lCore, smoothstep(0.35, 0.0, lr));',
+// ─── TESTO — reveal pulito ed elegante ───────
+'  float tx = texture2D(u_text, uv).r;',
+// FOBOS (alto) emerge prima del sottotitolo
+'  float depth = 1.0 + (1.0-uv.y)*0.55;',
+'  float reveal = smoothstep(0.03, 0.40*depth, light) * tx;',
+'  vec3 textCol = mix(ice, vec3(1.0), 0.5);',
+'  col = mix(col, textCol, reveal*0.96);',
+// Glow soffuso attorno alle lettere
+'  col += mix(cobalt, ice, 0.45) * smoothstep(0.02,0.26,light) * tx * 0.35;',
 
-// ─── CREPE CHE SI ILLUMINANO PER PRIME ───────
-// Energia che scorre nelle venature del materiale
-'  float crackConductor = crackEdge * totalLight * 4.0;',
-'  float crackReveal = smoothstep(0.0, 0.5, crackConductor);',
-'  vec3 crackLightCol = mix(lMid, lCore, crackReveal*0.7);',
+// ─── POST ─────────────────────────────────────
+// Vignette morbida voluminosa
+'  float vd = length(uv-0.5)*2.2;',
+'  float vig = 1.0 - smoothstep(0.25, 1.05, vd);',
+'  col *= 0.40 + 0.60*vig;',
 
-// ─── CAUSTICA nella zona illuminata ──────────
-// Shimmer come luce che si rifrange nel cristallo
-'  float caust1 = fbm3(auv*22.0 + vec2(t*1.3,-t*0.9));',
-'  float caust2 = fbm3(auv*36.0 + vec2(-t*1.0,t*1.4)+5.0);',
-'  float caustic = pow(clamp(caust1*caust2*1.8,0.0,1.0), 4.0)*6.0;',
+// Tone mapping filmico
+'  col = aces(col*1.18);',
 
-// ─── BLEND BASE CON LUCE ─────────────────────
-'  vec3 col = mix(base, lightCol, clamp(totalLight*1.25, 0.0, 1.0));',
-
-// Bloom additivo (fisicamente plausibile)
-'  col += lightCol * totalLight*0.60*(1.0-totalLight*0.45);',
-
-// Crepe che si illuminano di blu
-'  col += crackLightCol * crackReveal * ir * 0.70;',
-
-// Caustica
-'  col += lightCol * caustic * totalLight * 0.22;',
-
-// Atmosfera ambientale
-'  col += lAmb * ambient * 0.90;',
-
-// Anello ripple additivo
-'  col += lRipple * ripple * 0.55;',
-
-// ─── SPECULARE dalla normale ──────────────────
-'  vec3 L3 = normalize(vec3(amouse-auv, 0.35));',
-'  float spec = pow(max(dot(nrm,L3),0.0), 32.0);',
-'  col += lCore * spec * totalLight * 0.55;',
-
-// ─── TESTO ────────────────────────────────────
-// Aberrazione termica UV alla transizione luce/buio
-'  float boundary = smoothstep(0.04,0.32,totalLight)*(1.0-smoothstep(0.38,0.80,totalLight));',
-'  vec2 shimmer = vec2(',
-'    sin(uv.y*220.0+t*16.0)*0.0014,',
-'    cos(uv.x*180.0+t*13.0)*0.0014',
-'  )*boundary;',
-
-// Aberrazione cromatica: 3 campionamenti sfalsati (R, G, B)
-'  float caShift = 0.0055*clamp(totalLight,0.0,1.0);',
-'  vec2 shUv = uv + shimmer;',
-'  float tR = texture2D(u_text, shUv+vec2( caShift, 0.0)).r;',
-'  float tG = texture2D(u_text, shUv).r;',
-'  float tB = texture2D(u_text, shUv-vec2( caShift, 0.0)).r;',
-
-// FOBOS (UV y alto = parte superiore) emerge prima del sottotitolo
-'  float depthFactor = 1.0 + (1.0-uv.y)*0.65;',
-'  float tRevR = smoothstep(0.03, 0.38*depthFactor, totalLight)*tR;',
-'  float tRevG = smoothstep(0.04, 0.40*depthFactor, totalLight)*tG;',
-'  float tRevB = smoothstep(0.05, 0.42*depthFactor, totalLight)*tB;',
-
-'  vec3 textCol  = mix(lCore, vec3(1.0), 0.65);',
-'  col = mix(col, textCol, vec3(tRevR,tRevG,tRevB)*0.96);',
-
-// Alone attorno alle lettere
-'  float tAvg = (tR+tG+tB)/3.0;',
-'  col += mix(lMid, lCore, 0.4) * smoothstep(0.03,0.25,totalLight)*tAvg*0.42;',
-
-// ─── POST-PROCESSING ─────────────────────────
-// Vignette forte (voluminosa, come un oggetto fisico)
-'  float vd = length(uv-0.5)*2.3;',
-'  float vig = 1.0-smoothstep(0.20, 1.10, vd);',
-'  col *= 0.32 + 0.68*vig;',
-
-// ACES filmic tone mapping
-'  col = aces(col*1.15);',
-
-// Grain cinematografico (per-frame, antialiasing percettivo)
-'  float gr = h1(uv + fract(t*1.37)+fract(t*0.71)*3.73)-0.5;',
-'  col += gr*0.018;',
+// Dither sotto-soglia: uccide il banding, invisibile come grana
+'  col += dither(uv*u_res) * (1.0/255.0);',
 
 '  gl_FragColor = vec4(clamp(col,0.0,1.0), 1.0);',
 '}'
@@ -353,7 +248,6 @@ if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
 }
 gl.useProgram(prog);
 
-// Full-screen quad
 var vbo = gl.createBuffer();
 gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
 gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
@@ -366,12 +260,11 @@ var U = {
   mouse:    gl.getUniformLocation(prog,'u_mouse'),
   interact: gl.getUniformLocation(prog,'u_interact'),
   res:      gl.getUniformLocation(prog,'u_res'),
-  ripple:   gl.getUniformLocation(prog,'u_ripple'),
   text:     gl.getUniformLocation(prog,'u_text')
 };
 
 // ═══════════════════════════════════════════════
-// TEXTURE TESTO — Canvas 2D multi-layer
+// TEXTURE TESTO
 // ═══════════════════════════════════════════════
 function buildTextTexture() {
   var W = 2048, H = 1024;
@@ -381,64 +274,39 @@ function buildTextTexture() {
 
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, W, H);
-
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#fff';
 
-  var cx   = W / 2;
-  var tyY  = H * 0.385;   // FOBOS
-  var sepY = H * 0.535;   // linea
-  var suY  = H * 0.645;   // sottotitolo
+  var cx   = W/2;
+  var tyY  = H*0.385;
+  var sepY = H*0.535;
+  var suY  = H*0.645;
 
-  // ── FOBOS ── 4 passate di glow crescente
-  ctx.font = '800 196px "Helvetica Neue", Helvetica, Arial, sans-serif';
+  // FOBOS — 4 passate di glow
+  ctx.font = '700 196px "Helvetica Neue", Helvetica, Arial, sans-serif';
+  ctx.save(); ctx.globalAlpha=0.10; ctx.filter='blur(30px)'; ctx.fillText('FOBOS',cx,tyY); ctx.restore();
+  ctx.save(); ctx.globalAlpha=0.22; ctx.filter='blur(13px)'; ctx.fillText('FOBOS',cx,tyY); ctx.restore();
+  ctx.save(); ctx.globalAlpha=0.45; ctx.filter='blur(4px)';  ctx.fillText('FOBOS',cx,tyY); ctx.restore();
+  ctx.save(); ctx.globalAlpha=1.00; ctx.filter='none';       ctx.fillText('FOBOS',cx,tyY); ctx.restore();
 
-  // Glow esterno grandissimo
-  ctx.save(); ctx.globalAlpha = 0.10; ctx.filter = 'blur(28px)';
-  ctx.fillText('FOBOS', cx, tyY); ctx.restore();
-
-  // Glow medio
-  ctx.save(); ctx.globalAlpha = 0.22; ctx.filter = 'blur(12px)';
-  ctx.fillText('FOBOS', cx, tyY); ctx.restore();
-
-  // Glow stretto
-  ctx.save(); ctx.globalAlpha = 0.45; ctx.filter = 'blur(4px)';
-  ctx.fillText('FOBOS', cx, tyY); ctx.restore();
-
-  // Testo nitido
-  ctx.save(); ctx.globalAlpha = 1.0; ctx.filter = 'none';
-  ctx.fillText('FOBOS', cx, tyY); ctx.restore();
-
-  // ── Linea decorativa ──
+  // Linea decorativa con gradiente
   ctx.save();
-  var grad = ctx.createLinearGradient(cx-160, sepY, cx+160, sepY);
-  grad.addColorStop(0,   'rgba(255,255,255,0)');
-  grad.addColorStop(0.2, 'rgba(255,255,255,0.7)');
-  grad.addColorStop(0.8, 'rgba(255,255,255,0.7)');
-  grad.addColorStop(1,   'rgba(255,255,255,0)');
-  ctx.strokeStyle = grad;
-  ctx.lineWidth = 1.0;
-  ctx.beginPath();
-  ctx.moveTo(cx - 160, sepY);
-  ctx.lineTo(cx + 160, sepY);
-  ctx.stroke();
+  var g = ctx.createLinearGradient(cx-170, sepY, cx+170, sepY);
+  g.addColorStop(0,'rgba(255,255,255,0)');
+  g.addColorStop(0.25,'rgba(255,255,255,0.65)');
+  g.addColorStop(0.75,'rgba(255,255,255,0.65)');
+  g.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.strokeStyle = g; ctx.lineWidth = 1.0;
+  ctx.beginPath(); ctx.moveTo(cx-170,sepY); ctx.lineTo(cx+170,sepY); ctx.stroke();
   ctx.restore();
 
-  // ── SOTTOTITOLO ── 3 passate
+  // Sottotitolo — 3 passate
   ctx.font = '300 30px "Helvetica Neue", Helvetica, Arial, sans-serif';
-  ctx.fillStyle = '#fff';
+  ctx.save(); ctx.globalAlpha=0.14; ctx.filter='blur(11px)'; ctx.fillText('un server di test di Industree Hub',cx,suY); ctx.restore();
+  ctx.save(); ctx.globalAlpha=0.40; ctx.filter='blur(3px)';  ctx.fillText('un server di test di Industree Hub',cx,suY); ctx.restore();
+  ctx.save(); ctx.globalAlpha=0.90; ctx.filter='none';       ctx.fillText('un server di test di Industree Hub',cx,suY); ctx.restore();
 
-  ctx.save(); ctx.globalAlpha = 0.15; ctx.filter = 'blur(10px)';
-  ctx.fillText('un server di test di Industree Hub', cx, suY); ctx.restore();
-
-  ctx.save(); ctx.globalAlpha = 0.40; ctx.filter = 'blur(3px)';
-  ctx.fillText('un server di test di Industree Hub', cx, suY); ctx.restore();
-
-  ctx.save(); ctx.globalAlpha = 0.90; ctx.filter = 'none';
-  ctx.fillText('un server di test di Industree Hub', cx, suY); ctx.restore();
-
-  // Upload a WebGL
   var tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
@@ -471,28 +339,18 @@ resize();
 // ═══════════════════════════════════════════════
 // INPUT
 // ═══════════════════════════════════════════════
-var tx = 0.5, ty = 0.5;
-var sx = 0.5, sy = 0.5;
-var interact      = 0.0;
-var prevInteract  = 0.0;
-var lastMove      = -1e9;
-var isActive      = false;
-
-// Ripple state
-var rippleStartT  = -999;   // age enorme → invisibile inizialmente
-var rippleSX      = 0.5;
-var rippleSY      = 0.5;
+var tx=0.5, ty=0.5, sx=0.5, sy=0.5;
+var interact=0.0, lastMove=-1e9, isActive=false;
 
 function onMove(x, y) {
-  var r = canvas.getBoundingClientRect();
-  tx = (x - r.left) / r.width;
-  ty = 1.0 - (y - r.top) / r.height;
+  var rc = canvas.getBoundingClientRect();
+  tx = (x - rc.left)/rc.width;
+  ty = 1.0 - (y - rc.top)/rc.height;
   lastMove = performance.now();
   isActive = true;
 }
-
 window.addEventListener('mousemove',  function(e){ onMove(e.clientX,e.clientY); }, {passive:true});
-window.addEventListener('mouseleave', function(){  isActive=false; },             {passive:true});
+window.addEventListener('mouseleave', function(){  isActive=false; }, {passive:true});
 window.addEventListener('touchstart', function(e){ onMove(e.touches[0].clientX,e.touches[0].clientY); }, {passive:true});
 window.addEventListener('touchmove',  function(e){ e.preventDefault(); onMove(e.touches[0].clientX,e.touches[0].clientY); }, {passive:false});
 window.addEventListener('touchend',   function(){  isActive=false; }, {passive:true});
@@ -505,41 +363,23 @@ var prevT  = startT;
 
 function render(now) {
   requestAnimationFrame(render);
-
-  var dt = Math.min((now - prevT) * 0.001, 0.05);
+  var dt = Math.min((now - prevT)*0.001, 0.05);
   prevT = now;
-  var elapsed = (now - startT) * 0.001;
+  var elapsed = (now - startT)*0.001;
 
-  // Exponential lerp mouse (seta pura)
-  var alpha = 1.0 - Math.exp(-8.0 * dt);
-  sx += (tx - sx) * alpha;
-  sy += (ty - sy) * alpha;
+  var alpha = 1.0 - Math.exp(-7.0*dt);  // lerp setoso
+  sx += (tx - sx)*alpha;
+  sy += (ty - sy)*alpha;
 
-  // Accumulo interazione
   var moving = isActive && (now - lastMove) < 90;
-  prevInteract = interact;
-  if (moving) {
-    interact = Math.min(1.0, interact + dt * 3.2);
-  } else {
-    interact = Math.max(0.0, interact - dt * 0.42);
-  }
-
-  // Nuovo ripple: quando interact supera soglia partendo da 0
-  if (interact > 0.04 && prevInteract <= 0.04) {
-    rippleStartT = now;
-    rippleSX = sx;
-    rippleSY = sy;
-  }
-  var rippleAge = (now - rippleStartT) * 0.001;
+  if (moving) interact = Math.min(1.0, interact + dt*3.0);
+  else        interact = Math.max(0.0, interact - dt*0.42);
 
   gl.uniform1f(U.time,     elapsed);
   gl.uniform2f(U.mouse,    sx, sy);
   gl.uniform1f(U.interact, interact);
-  gl.uniform3f(U.ripple,   rippleSX, rippleSY, rippleAge);
-
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
-
 requestAnimationFrame(render);
 
 }());
