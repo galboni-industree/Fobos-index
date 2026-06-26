@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="description" content="Fobos, un server di test di Industree Hub">
+<meta name="theme-color" content="#000000">
 <title>Fobos — Industree Hub</title>
 <style>
   *, *::before, *::after {
@@ -12,24 +13,25 @@
     -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none; user-select: none;
     -webkit-touch-callout: none;
   }
+  html { background: #000; }
   html, body {
-    width: 100%; height: 100%; background: #060304; overflow: hidden; cursor: none;
+    width: 100%; height: 100%; background: #000; overflow: hidden; cursor: none;
     -webkit-tap-highlight-color: transparent;  /* niente flash al tocco su mobile */
     touch-action: none;                          /* niente scroll/zoom/selezione di default */
     overscroll-behavior: none;
   }
-  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; background: #000; touch-action: none; }
   #fallback {
     display: none; position: fixed; inset: 0;
     align-items: center; justify-content: center; flex-direction: column; gap: 1rem;
-    background: #060304;
+    background: #000;
     font: 300 1rem/1.8 "Helvetica Neue", Helvetica, Arial, sans-serif;
     text-align: center; color: #3a2a26;
   }
   #fallback strong { font-size: 2.5rem; font-weight: 800; letter-spacing: .3em; color: #5a342c; }
 </style>
 </head>
-<body>
+<body style="background:#000">
 <canvas id="c"></canvas>
 <div id="fallback">
   <strong>FOBOS</strong>
@@ -59,6 +61,7 @@ var FS = [
 'precision highp float;',
 'varying vec2 v_uv;',
 'uniform float u_time;',
+'uniform float u_warpTime;',  // tempo del background, accelera in interazione
 'uniform vec2  u_mouse;',
 'uniform float u_interact;',
 'uniform vec2  u_res;',
@@ -116,13 +119,14 @@ var FS = [
 // ─── DOMAIN WARP doppio (pieghe di raso) ──────
 // Movimento idle quasi nullo: coefficienti minuscoli
 '  vec2 p = uv * vec2(2.6*ar, 2.6) + u_seed;',   // offset random → pieghe diverse ad ogni load
+'  float tw = u_warpTime;',  // accelera dolcemente durante l\'interazione
 '  vec2 q = vec2(',
-'    flow(p + vec2(0.0, 0.0) + t*0.008),',
-'    flow(p + vec2(5.2, 1.3) - t*0.006)',
+'    flow(p + vec2(0.0, 0.0) + tw*0.008),',
+'    flow(p + vec2(5.2, 1.3) - tw*0.006)',
 '  );',
 '  vec2 r = vec2(',
-'    flow(p + 3.0*q + vec2(1.7, 9.2) + t*0.010),',
-'    flow(p + 3.0*q + vec2(8.3, 2.8) - t*0.007)',
+'    flow(p + 3.0*q + vec2(1.7, 9.2) + tw*0.010),',
+'    flow(p + 3.0*q + vec2(8.3, 2.8) - tw*0.007)',
 '  );',
 '  float silk = flow(p + 2.4*r);',          // campo di altezza della seta
 
@@ -180,12 +184,12 @@ var FS = [
 '    float ir  = u_interact;',
 '    float ir2 = ir*ir;',
 '    float ir4 = ir2*ir2;',
-// Flusso temporale dedicato → bordi che ondeggiano e colano come inchiostro vivo
+// Flusso temporale dedicato → bordi che colano come inchiostro, lento e liquido
 '    vec2 lflow = vec2(',
-'      flow(p*0.85 + vec2( t*0.060, -t*0.018) + 11.3),',
-'      flow(p*0.85 + vec2(-t*0.022,  t*0.055) + 23.7)',
+'      flow(p*0.85 + vec2( t*0.028, -t*0.009) + 11.3),',
+'      flow(p*0.85 + vec2(-t*0.011,  t*0.026) + 23.7)',
 '    ) - 0.5;',
-'    vec2 inkOffset = (lflow*0.30 + (r-0.5)*0.16) * (0.45 + ir);',
+'    vec2 inkOffset = (lflow*0.26 + (r-0.5)*0.16) * (0.45 + ir);',
 '    vec2 lp = auv + inkOffset;',
 '    float dist = length(lp - amouse);',
 // Solo luce DIFFUSA: raggio grande con respiro morbido, nessun nucleo/hotspot
@@ -200,6 +204,10 @@ var FS = [
 '    float lr = clamp(dist/max(lR,0.01), 0.0, 2.2);',
 '    lightCol = mix(abyss, cobalt, smoothstep(1.6, 0.20, lr));',
 '  }',
+
+// Contrasto della seta accentuato dove arriva la luce: pivot basso →
+// le pieghe scure diventano più scure, le creste più luminose (background inciso)
+'  col = clamp((col - 0.14)*(1.0 + light*1.45) + 0.14, 0.0, 1.0);',
 
 // Blend morbido — quando idle light=0, questi termini sono nulli
 '  col = mix(col, lightCol, clamp(light*0.92, 0.0, 0.82));',
@@ -307,6 +315,7 @@ gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
 
 var U = {
   time:     gl.getUniformLocation(prog,'u_time'),
+  warpTime: gl.getUniformLocation(prog,'u_warpTime'),
   mouse:    gl.getUniformLocation(prog,'u_mouse'),
   interact: gl.getUniformLocation(prog,'u_interact'),
   res:      gl.getUniformLocation(prog,'u_res'),
@@ -460,12 +469,14 @@ window.addEventListener('touchend',   function(){  isActive=false; }, {passive:t
 // ═══════════════════════════════════════════════
 var startT = performance.now();
 var prevT  = startT;
+var elapsed  = 0.0;   // tempo globale
+var warpTime = 0.0;   // tempo del background, accelera in interazione
 
 function render(now) {
   requestAnimationFrame(render);
   var dt = Math.min((now - prevT)*0.001, 0.05);
   prevT = now;
-  var elapsed = (now - startT)*0.001;
+  elapsed += dt;
 
   var alpha = 1.0 - Math.exp(-3.6*dt);  // lerp setoso, lento e languido
   sx += (tx - sx)*alpha;
@@ -475,7 +486,12 @@ function render(now) {
   if (moving) interact = Math.min(1.0, interact + dt*1.5);   // emersione lenta
   else        interact = Math.max(0.0, interact - dt*0.22);  // dissolvenza lenta
 
+  // Il background scorre un po' più veloce durante l'interazione (integrato →
+  // nessuno scatto di fase quando interact cambia)
+  warpTime += dt * (1.0 + interact*0.85);
+
   gl.uniform1f(U.time,     elapsed);
+  gl.uniform1f(U.warpTime, warpTime);
   gl.uniform2f(U.mouse,    sx, sy);
   gl.uniform1f(U.interact, interact);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
