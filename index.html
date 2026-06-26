@@ -53,6 +53,8 @@ var FS = [
 'uniform float u_interact;',
 'uniform vec2  u_res;',
 'uniform vec2  u_seed;',    // random per ogni caricamento
+'uniform vec2  u_bdir;',    // direzione banda satinata (calcolata su CPU dal seed)
+'uniform vec3  u_emberCol;',// colore brace (calcolato su CPU dal seed)
 'uniform sampler2D u_text;',
 
 // ─── Value noise SMOOTH (quintic) — niente grana ───
@@ -141,9 +143,8 @@ var FS = [
 
 // ─── BANDA SATINATA che scorre lentissima ────
 // Luce di studio che attraversa il tessuto — direzione random ad ogni load
-'  float bang = u_seed.x*1.7 + u_seed.y*0.9;',
-'  vec2 bdir = normalize(vec2(cos(bang), sin(bang)) + 0.0001);',
-'  float bandCoord = dot(uv, bdir) - t*0.009;',
+// (u_bdir e fase precalcolati su CPU dal seed)
+'  float bandCoord = dot(uv, u_bdir) - t*0.009;',
 '  float band = pow(0.5+0.5*sin(bandCoord*3.1416 + u_seed.y*6.2831), 2.2);',
 '  col += sheenCol * band * sheen * 0.5 * (1.0 - u_interact*0.6);',
 
@@ -151,59 +152,49 @@ var FS = [
 // Vive nelle creste della seta, pulsazione ipnotica con fase random
 '  float breath = 0.55 + 0.45*sin(t*0.13 + silk*4.0 + u_seed.x*6.2831);',
 '  float emberMask = smoothstep(0.55, 0.95, silk);',
-// Tinta calda lievemente variabile ad ogni load (cremisi ↔ rosso-arancio)
-'  float warmth = 0.5 + 0.5*sin(u_seed.x*2.3 + u_seed.y*1.1);',
-'  vec3 emberCol = mix(vec3(0.46,0.070,0.045), vec3(0.55,0.110,0.022), warmth);',
-'  col += emberCol * emberMask * breath * 0.40 * (1.0 - u_interact*0.78);',
+'  col += u_emberCol * emberMask * breath * 0.40 * (1.0 - u_interact*0.78);',
 // Bagliore caldo atmosferico globale
 '  col += vec3(0.030, 0.006, 0.004) * silk * (1.0 - u_interact*0.7);',
 
 // ─── LUCE BLU LIQUIDA (interazione) ──────────
-'  float ir  = u_interact;',
-'  float ir2 = ir*ir;',
-'  float ir4 = ir2*ir2;',
-
-// FLUSSO TEMPORALE DEDICATO ALLA LUCE → illuminazione fluida.
-// Più vivo della seta (che resta lentissima): i bordi ondeggiano e colano.
-'  vec2 lflow = vec2(',
-'    flow(p*0.85 + vec2( t*0.060, -t*0.018) + 11.3),',
-'    flow(p*0.85 + vec2(-t*0.022,  t*0.055) + 23.7)',
-'  ) - 0.5;',
-// La posizione del campione viene spinta dal flusso → la luce cola come
-// inchiostro vivo, non un cerchio. Combina flusso animato + warp della seta.
-'  vec2 inkOffset = (lflow*0.30 + (r-0.5)*0.16) * (0.45 + ir);',
-'  vec2 lp = auv + inkOffset;',
-'  float dist = length(lp - amouse);',
-
-// Solo luce DIFFUSA: nessun nucleo stretto/hotspot.
-// Raggio grande già a riposo, con respiro morbido che lo fa pulsare.
-'  float lR = (0.30 + ir2*0.75) * (1.0 + 0.06*sin(t*0.45 + silk*3.0));',
-// Modulazione morbida del raggio col flusso vivo → bordo organico, mai un punto
-'  float lRm = lR * (0.85 + 0.30*silk + 0.10*lflow.x);',
-// Gaussiana ampia (peso maggiore) + alone ancora più largo, nessun picco netto
-'  float glow = exp(-dist*dist / (lRm*lRm + 0.0001));',
-'  float wide = exp(-dist*dist / (lR*lR*3.5 + 0.0001));',
-
-// Riempimento ambientale liscio dal centro
-'  float cDist = length(auv*0.5);',
-'  float ambient = ir4*0.60*exp(-cDist*2.2);',
-
-// Combinazione pesata e morbida (no max → no bordo del picco), intensità contenuta
-'  float light = (glow*0.62 + wide*0.38) * ir;',
-'  light = max(light, ambient*ir);',
-
-// ─── COLORE LUCE DIFFUSA: abisso → cobalto (niente nucleo bianco) ─
-'  float lr = clamp(dist/max(lR,0.01), 0.0, 2.2);',
+// Colori luce (servono anche al glow del testo → fuori dal branch)
 '  vec3 ice    = vec3(0.918, 0.965, 1.000);',
 '  vec3 cobalt = vec3(0.162, 0.502, 1.000);',
 '  vec3 abyss  = vec3(0.039, 0.118, 0.353);',
-'  vec3 lightCol = mix(abyss, cobalt, smoothstep(1.6, 0.20, lr));',
+'  float light = 0.0;',
+'  float ambient = 0.0;',
+'  vec3 lightCol = vec3(0.0);',
+// Tutto il costo della luce SOLO durante l\'interazione. u_interact è un
+// uniform → branch coerente su tutti i pixel, nessuna divergenza, resa identica.
+'  if (u_interact > 0.0001) {',
+'    float ir  = u_interact;',
+'    float ir2 = ir*ir;',
+'    float ir4 = ir2*ir2;',
+// Flusso temporale dedicato → bordi che ondeggiano e colano come inchiostro vivo
+'    vec2 lflow = vec2(',
+'      flow(p*0.85 + vec2( t*0.060, -t*0.018) + 11.3),',
+'      flow(p*0.85 + vec2(-t*0.022,  t*0.055) + 23.7)',
+'    ) - 0.5;',
+'    vec2 inkOffset = (lflow*0.30 + (r-0.5)*0.16) * (0.45 + ir);',
+'    vec2 lp = auv + inkOffset;',
+'    float dist = length(lp - amouse);',
+// Solo luce DIFFUSA: raggio grande con respiro morbido, nessun nucleo/hotspot
+'    float lR = (0.30 + ir2*0.75) * (1.0 + 0.06*sin(t*0.45 + silk*3.0));',
+'    float lRm = lR * (0.85 + 0.30*silk + 0.10*lflow.x);',
+'    float glow = exp(-dist*dist / (lRm*lRm + 0.0001));',
+'    float wide = exp(-dist*dist / (lR*lR*3.5 + 0.0001));',
+'    float cDist = length(auv*0.5);',
+'    ambient = ir4*0.60*exp(-cDist*2.2);',
+'    light = (glow*0.62 + wide*0.38) * ir;',
+'    light = max(light, ambient*ir);',
+'    float lr = clamp(dist/max(lR,0.01), 0.0, 2.2);',
+'    lightCol = mix(abyss, cobalt, smoothstep(1.6, 0.20, lr));',
+'  }',
 
-// Blend morbido — intensità contenuta, nessun hotspot/faro
+// Blend morbido — quando idle light=0, questi termini sono nulli
 '  col = mix(col, lightCol, clamp(light*0.92, 0.0, 0.82));',
 '  col += lightCol * light * 0.30;',
 '  col += abyss * ambient * 0.9;',
-
 // Riflesso satinato freddo sulla seta illuminata (sheen vira al blu)
 '  col += vec3(0.10,0.30,0.55) * sheen * light * 0.5;',
 
@@ -310,6 +301,8 @@ var U = {
   interact: gl.getUniformLocation(prog,'u_interact'),
   res:      gl.getUniformLocation(prog,'u_res'),
   seed:     gl.getUniformLocation(prog,'u_seed'),
+  bdir:     gl.getUniformLocation(prog,'u_bdir'),
+  emberCol: gl.getUniformLocation(prog,'u_emberCol'),
   text:     gl.getUniformLocation(prog,'u_text')
 };
 
@@ -317,6 +310,19 @@ var U = {
 var seedX = Math.random()*1000.0;
 var seedY = Math.random()*1000.0;
 gl.uniform2f(U.seed, seedX, seedY);
+
+// Costanti derivate dal seed, calcolate UNA VOLTA su CPU (prima erano per-pixel):
+// direzione della banda satinata
+var bang = seedX*1.7 + seedY*0.9;
+var bdx = Math.cos(bang), bdy = Math.sin(bang);
+var blen = Math.sqrt(bdx*bdx + bdy*bdy) || 1.0;
+gl.uniform2f(U.bdir, bdx/blen, bdy/blen);
+// colore brace (cremisi ↔ rosso-arancio)
+var warmth = 0.5 + 0.5*Math.sin(seedX*2.3 + seedY*1.1);
+gl.uniform3f(U.emberCol,
+  0.46 + (0.55-0.46)*warmth,
+  0.070 + (0.110-0.070)*warmth,
+  0.045 + (0.022-0.045)*warmth);
 
 // ═══════════════════════════════════════════════
 // TEXTURE TESTO — cascata di font di sistema moderni
