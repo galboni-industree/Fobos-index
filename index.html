@@ -126,18 +126,30 @@ var FS = [
 '  vec3 col = mix(deep, carbon, smoothstep(0.30, 0.62, silk));',
 '  col = mix(col, smoke, smoothstep(0.60, 0.92, silk));',
 
-// ─── SHEEN ANISOTROPO (il "setoso") ───────────
+// ─── SHEEN ANISOTROPO IRIDESCENTE (il "setoso") ──
 // Highlight allungato lungo la direzione del flusso
 '  float sheenDir = slope.x*0.7 - slope.y*0.7;',
-'  float sheen = pow(clamp(0.5+0.5*sin(silk*7.0 + sheenDir*2.2), 0.0, 1.0), 3.5);',
-'  col += vec3(0.34, 0.12, 0.085) * sheen * smoothstep(0.45,0.95,silk) * (1.0 - u_interact*0.6);',
+'  float sheenPhase = silk*7.0 + sheenDir*2.2;',
+'  float sheen = pow(clamp(0.5+0.5*sin(sheenPhase), 0.0, 1.0), 3.5);',
+// Iridescenza calda: il riflesso vira tra rame e cremisi (thin-film, gamut caldo)
+'  float irid = 0.5 + 0.5*sin(sheenPhase*0.5 + silk*3.0);',
+'  vec3 copper  = vec3(0.40, 0.20, 0.11);',
+'  vec3 crimson = vec3(0.34, 0.06, 0.05);',
+'  vec3 sheenCol = mix(crimson, copper, irid);',
+'  col += sheenCol * sheen * smoothstep(0.45,0.95,silk) * (1.0 - u_interact*0.6);',
+
+// ─── BANDA SATINATA che scorre lentissima ────
+// Luce di studio che attraversa il tessuto — moto ipnotico, ampio
+'  float bandCoord = uv.x*0.85 + uv.y*0.55 - t*0.022;',
+'  float band = pow(0.5+0.5*sin(bandCoord*3.1416), 2.2);',
+'  col += sheenCol * band * sheen * 0.5 * (1.0 - u_interact*0.6);',
 
 // ─── BRACE ROSSA DIFFUSA (liscia, respira) ───
 // Vive nelle creste della seta, pulsazione ipnotica lentissima
-'  float breath = 0.55 + 0.45*sin(t*0.28 + silk*4.0);',
+'  float breath = 0.55 + 0.45*sin(t*0.24 + silk*4.0);',
 '  float emberMask = smoothstep(0.55, 0.95, silk);',
-'  vec3 emberCol = vec3(0.48, 0.085, 0.030);',
-'  col += emberCol * emberMask * breath * 0.42 * (1.0 - u_interact*0.78);',
+'  vec3 emberCol = vec3(0.50, 0.090, 0.032);',
+'  col += emberCol * emberMask * breath * 0.40 * (1.0 - u_interact*0.78);',
 // Bagliore caldo atmosferico globale
 '  col += vec3(0.030, 0.006, 0.004) * silk * (1.0 - u_interact*0.7);',
 
@@ -147,14 +159,17 @@ var FS = [
 '  float ir4 = ir2*ir2;',
 
 // La posizione del campione viene spinta dal flow field →
-// la luce cola nelle pieghe come inchiostro, non un cerchio
-'  vec2 inkOffset = (r - 0.5) * 0.22 * (0.5 + ir);',
+// la luce cola nelle pieghe come inchiostro, non un cerchio.
+// Doppio livello di warp (q e r) → bordo organico, tentacoli morbidi
+'  vec2 inkOffset = ((r-0.5)*0.26 + (q-0.5)*0.14) * (0.5 + ir);',
 '  vec2 lp = auv + inkOffset;',
 '  float dist = length(lp - amouse);',
 
 // Raggio cresce quadraticamente: scintilla → invasione
 '  float lR = 0.05 + ir2*0.60;',
-'  float core = exp(-dist*dist / (lR*lR + 0.0001));',
+// Modulazione del raggio col flow → contorno frastagliato come inchiostro
+'  float lRm = lR * (0.82 + 0.36*silk);',
+'  float core = exp(-dist*dist / (lRm*lRm + 0.0001));',
 '  float halo = exp(-dist*dist / (lR*lR*9.0 + 0.0001)) * 0.40;',
 
 // Riempimento ambientale liscio dal centro
@@ -190,13 +205,25 @@ var FS = [
 '  col += mix(cobalt, ice, 0.45) * smoothstep(0.02,0.26,light) * tx * 0.35;',
 
 // ─── POST ─────────────────────────────────────
+// Drappo verticale: la parte alta lievemente più scura → volume
+'  col *= 0.88 + 0.12*uv.y;',
+
 // Vignette morbida voluminosa
-'  float vd = length(uv-0.5)*2.2;',
+'  float vd = length((uv-0.5)*vec2(1.05,1.0))*2.2;',
 '  float vig = 1.0 - smoothstep(0.25, 1.05, vd);',
-'  col *= 0.40 + 0.60*vig;',
+'  col *= 0.38 + 0.62*vig;',
 
 // Tone mapping filmico
-'  col = aces(col*1.18);',
+'  col = aces(col*1.20);',
+
+// Color grading: ombre fredde, alte luci calde (split-tone cinematografico)
+'  float luma = dot(col, vec3(0.299,0.587,0.114));',
+'  col += vec3(-0.010,0.0,0.018) * (1.0-luma);',   // ombre verso il blu
+'  col += vec3( 0.014,0.004,-0.006) * luma;',       // luci verso il caldo
+'  col = clamp(col, 0.0, 1.0);',
+// Saturazione +leggera e contrasto morbido
+'  col = mix(vec3(luma), col, 1.10);',
+'  col = clamp((col-0.5)*1.06 + 0.5, 0.0, 1.0);',
 
 // Dither sotto-soglia: uccide il banding, invisibile come grana
 '  col += dither(uv*u_res) * (1.0/255.0);',
@@ -264,9 +291,30 @@ var U = {
 };
 
 // ═══════════════════════════════════════════════
-// TEXTURE TESTO
+// TEXTURE TESTO — cascata di font di sistema moderni
+//   su iPhone/Mac → SF Pro, Windows → Segoe UI, Android → Roboto
 // ═══════════════════════════════════════════════
-function buildTextTexture() {
+var SYS = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+
+// Disegna testo centrato con tracking (spaziatura) manuale e robusto
+function drawTracked(ctx, text, cx, y, trackPx) {
+  var widths = [], total = 0;
+  for (var i = 0; i < text.length; i++) {
+    var w = ctx.measureText(text[i]).width;
+    widths.push(w);
+    total += w + (i < text.length - 1 ? trackPx : 0);
+  }
+  var x = cx - total / 2;
+  var prevAlign = ctx.textAlign;
+  ctx.textAlign = 'left';
+  for (var j = 0; j < text.length; j++) {
+    ctx.fillText(text[j], x, y);
+    x += widths[j] + trackPx;
+  }
+  ctx.textAlign = prevAlign;
+}
+
+function buildTextTexture(existing) {
   var W = 2048, H = 1024;
   var tc = document.createElement('canvas');
   tc.width = W; tc.height = H;
@@ -279,35 +327,38 @@ function buildTextTexture() {
   ctx.fillStyle = '#fff';
 
   var cx   = W/2;
-  var tyY  = H*0.385;
-  var sepY = H*0.535;
-  var suY  = H*0.645;
+  var tyY  = H*0.380;
+  var sepY = H*0.520;
+  var suY  = H*0.620;
 
-  // FOBOS — 4 passate di glow
-  ctx.font = '700 196px "Helvetica Neue", Helvetica, Arial, sans-serif';
-  ctx.save(); ctx.globalAlpha=0.10; ctx.filter='blur(30px)'; ctx.fillText('FOBOS',cx,tyY); ctx.restore();
-  ctx.save(); ctx.globalAlpha=0.22; ctx.filter='blur(13px)'; ctx.fillText('FOBOS',cx,tyY); ctx.restore();
-  ctx.save(); ctx.globalAlpha=0.45; ctx.filter='blur(4px)';  ctx.fillText('FOBOS',cx,tyY); ctx.restore();
-  ctx.save(); ctx.globalAlpha=1.00; ctx.filter='none';       ctx.fillText('FOBOS',cx,tyY); ctx.restore();
+  // ── FOBOS — peso ultra-leggero, lettere ampiamente spaziate ──
+  var titleTrack = 64;   // tracking generoso → eleganza minimale
+  ctx.font = '200 176px ' + SYS;
+  ctx.save(); ctx.globalAlpha=0.09; ctx.filter='blur(34px)'; drawTracked(ctx,'FOBOS',cx,tyY,titleTrack); ctx.restore();
+  ctx.save(); ctx.globalAlpha=0.20; ctx.filter='blur(15px)'; drawTracked(ctx,'FOBOS',cx,tyY,titleTrack); ctx.restore();
+  ctx.save(); ctx.globalAlpha=0.42; ctx.filter='blur(5px)';  drawTracked(ctx,'FOBOS',cx,tyY,titleTrack); ctx.restore();
+  ctx.save(); ctx.globalAlpha=1.00; ctx.filter='none';       drawTracked(ctx,'FOBOS',cx,tyY,titleTrack); ctx.restore();
 
-  // Linea decorativa con gradiente
+  // ── Linea decorativa sottilissima con gradiente ──
   ctx.save();
-  var g = ctx.createLinearGradient(cx-170, sepY, cx+170, sepY);
-  g.addColorStop(0,'rgba(255,255,255,0)');
-  g.addColorStop(0.25,'rgba(255,255,255,0.65)');
-  g.addColorStop(0.75,'rgba(255,255,255,0.65)');
-  g.addColorStop(1,'rgba(255,255,255,0)');
+  var lineW = 150;
+  var g = ctx.createLinearGradient(cx-lineW, sepY, cx+lineW, sepY);
+  g.addColorStop(0,   'rgba(255,255,255,0)');
+  g.addColorStop(0.5, 'rgba(255,255,255,0.55)');
+  g.addColorStop(1,   'rgba(255,255,255,0)');
   ctx.strokeStyle = g; ctx.lineWidth = 1.0;
-  ctx.beginPath(); ctx.moveTo(cx-170,sepY); ctx.lineTo(cx+170,sepY); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx-lineW,sepY); ctx.lineTo(cx+lineW,sepY); ctx.stroke();
   ctx.restore();
 
-  // Sottotitolo — 3 passate
-  ctx.font = '300 30px "Helvetica Neue", Helvetica, Arial, sans-serif';
-  ctx.save(); ctx.globalAlpha=0.14; ctx.filter='blur(11px)'; ctx.fillText('un server di test di Industree Hub',cx,suY); ctx.restore();
-  ctx.save(); ctx.globalAlpha=0.40; ctx.filter='blur(3px)';  ctx.fillText('un server di test di Industree Hub',cx,suY); ctx.restore();
-  ctx.save(); ctx.globalAlpha=0.90; ctx.filter='none';       ctx.fillText('un server di test di Industree Hub',cx,suY); ctx.restore();
+  // ── Sottotitolo — minuscolo, leggero, lievemente tracciato ──
+  var sub = 'un server di test di Industree Hub';
+  var subTrack = 5;
+  ctx.font = '300 29px ' + SYS;
+  ctx.save(); ctx.globalAlpha=0.13; ctx.filter='blur(12px)'; drawTracked(ctx,sub,cx,suY,subTrack); ctx.restore();
+  ctx.save(); ctx.globalAlpha=0.38; ctx.filter='blur(3px)';  drawTracked(ctx,sub,cx,suY,subTrack); ctx.restore();
+  ctx.save(); ctx.globalAlpha=0.92; ctx.filter='none';       drawTracked(ctx,sub,cx,suY,subTrack); ctx.restore();
 
-  var tex = gl.createTexture();
+  var tex = existing || gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, tc);
@@ -319,6 +370,11 @@ function buildTextTexture() {
 }
 
 var textTex = buildTextTexture();
+// Ricostruisce la texture quando i font di sistema sono pienamente pronti
+// (metriche stabili) — su Apple garantisce SF Pro renderizzato correttamente
+if (document.fonts && document.fonts.ready) {
+  document.fonts.ready.then(function(){ buildTextTexture(textTex); });
+}
 gl.activeTexture(gl.TEXTURE0);
 gl.bindTexture(gl.TEXTURE_2D, textTex);
 gl.uniform1i(U.text, 0);
