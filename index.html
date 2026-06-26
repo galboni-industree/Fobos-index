@@ -214,12 +214,16 @@ var FS = [
 // le pieghe scure diventano più scure, le creste più luminose (background inciso)
 '  col = clamp((col - 0.14)*(1.0 + light*1.45) + 0.14, 0.0, 1.0);',
 
+// PROTEZIONE DEL ROSSO: dove la brace arde è emissiva → il blu non la
+// sostituisce né le si somma sopra (così resta rossa anche a luce blu piena)
+'  float redKeep = clamp(emberStr*1.3, 0.0, 0.86);',
+
 // Blend morbido — quando idle light=0, questi termini sono nulli
-'  col = mix(col, lightCol, clamp(light*0.92, 0.0, 0.82));',
-'  col += lightCol * light * 0.30;',
-'  col += abyss * ambient * 0.9;',
+'  col = mix(col, lightCol, clamp(light*0.92, 0.0, 0.82) * (1.0 - redKeep));',
+'  col += lightCol * light * 0.30 * (1.0 - redKeep);',
+'  col += abyss * ambient * 0.9 * (1.0 - redKeep*0.6);',
 // Riflesso satinato freddo sulla seta illuminata (sheen vira al blu)
-'  col += vec3(0.10,0.30,0.55) * sheen * light * 0.5;',
+'  col += vec3(0.10,0.30,0.55) * sheen * light * 0.5 * (1.0 - redKeep*0.7);',
 
 // ─── TESTO — campionamento che PRESERVA le proporzioni ───
 // La texture è 2:1; mappata "contain" + zoom così non si deforma mai
