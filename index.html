@@ -341,7 +341,7 @@ if (document.fonts && document.fonts.ready) {
 gl.activeTexture(gl.TEXTURE0);
 gl.bindTexture(gl.TEXTURE_2D, textTex);
 gl.uniform1i(U.text, 0);
-function resize() {
+function applyResize() {
   var dpr = Math.min(window.devicePixelRatio || 1, 1.5);
   canvas.width  = Math.round(window.innerWidth  * dpr);
   canvas.height = Math.round(window.innerHeight * dpr);
@@ -351,8 +351,10 @@ function resize() {
   gl.uniform1f(U.ar, ar);
   gl.uniform1f(U.fitT, Math.min(ar/2.0, 1.0) * 1.42);
 }
-window.addEventListener('resize', resize, { passive: true });
-resize();
+var pendingResize = false;
+window.addEventListener('resize',            function(){ pendingResize = true; }, { passive: true });
+window.addEventListener('orientationchange', function(){ pendingResize = true; }, { passive: true });
+applyResize();
 var tx=0.5, ty=0.5, sx=0.5, sy=0.5;
 var interact=0.0, lastMove=-1e9, isActive=false;
 function onMove(x, y) {
@@ -373,6 +375,7 @@ var elapsed  = 0.0;
 var warpTime = 0.0;
 function render(now) {
   requestAnimationFrame(render);
+  if (pendingResize) { applyResize(); pendingResize = false; }
   var dt = Math.min((now - prevT)*0.001, 0.05);
   prevT = now;
   elapsed += dt;
