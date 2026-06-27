@@ -17,9 +17,12 @@
     -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none; user-select: none;
     -webkit-touch-callout: none;
   }
-  html { background: #000; }
-  html, body {
-    width: 100%; height: 100%; background: #000; overflow: hidden; cursor: none;
+  html { background: #000; color-scheme: dark; }
+  html, body, #app {
+    width: 100%; height: 100%; background: #000;
+  }
+  body {
+    overflow: hidden; cursor: none;
     -webkit-tap-highlight-color: transparent;
     touch-action: none;
     overscroll-behavior: none;
@@ -29,18 +32,26 @@
     display: none; position: fixed; inset: 0;
     align-items: center; justify-content: center; flex-direction: column; gap: 1rem;
     background: #000;
-    font: 300 1rem/1.8 "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font: 300 1rem/1.8 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     text-align: center; color: #3a2a26;
   }
   #fallback strong { font-size: 2.5rem; font-weight: 800; letter-spacing: .3em; color: #5a342c; }
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+    overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+  }
 </style>
 </head>
 <body style="background:#000">
-<canvas id="c"></canvas>
-<div id="fallback">
+<main id="app" aria-label="FOBOS, un server di test di Industree Hub">
+<h1 class="sr-only">FOBOS</h1>
+<p class="sr-only">Un server di test di Industree Hub</p>
+<canvas id="c" aria-hidden="true"></canvas>
+<div id="fallback" role="status">
   <strong>FOBOS</strong>
   <span>un server di test di Industree Hub</span>
 </div>
+</main>
 <script>
 (function () {
 'use strict';
@@ -171,7 +182,8 @@ var FS = [
 '    light = (glow*0.62 + wide*0.38) * ir;',
 '    light = max(light, ambient*ir);',
 '    float lr = clamp(dist/max(lR,0.01), 0.0, 2.2);',
-'    lightCol = mix(abyss, cobalt, smoothstep(1.6, 0.20, lr));',
+'    float nearMouse = 1.0 - smoothstep(0.20, 1.6, lr);',
+'    lightCol = mix(abyss, cobalt, nearMouse);',
 '  }',
 '  col = clamp((col - 0.14)*(1.0 + light*1.45) + 0.14, 0.0, 1.0);',
 '  float redKeep = clamp(emberStr*1.3, 0.0, 0.86);',
@@ -343,8 +355,10 @@ gl.bindTexture(gl.TEXTURE_2D, textTex);
 gl.uniform1i(U.text, 0);
 function applyResize() {
   var dpr = Math.min(window.devicePixelRatio || 1, 1.5);
-  canvas.width  = Math.round(window.innerWidth  * dpr);
-  canvas.height = Math.round(window.innerHeight * dpr);
+  var w = canvas.clientWidth  || window.innerWidth;
+  var h = canvas.clientHeight || window.innerHeight;
+  canvas.width  = Math.max(1, Math.round(w * dpr));
+  canvas.height = Math.max(1, Math.round(h * dpr));
   gl.viewport(0, 0, canvas.width, canvas.height);
   gl.uniform2f(U.res, canvas.width, canvas.height);
   var ar = canvas.width / canvas.height;
@@ -352,29 +366,37 @@ function applyResize() {
   gl.uniform1f(U.fitT, Math.min(ar/2.0, 1.0) * 1.42);
 }
 var pendingResize = false;
-window.addEventListener('resize',            function(){ pendingResize = true; }, { passive: true });
-window.addEventListener('orientationchange', function(){ pendingResize = true; }, { passive: true });
+function markResize(){ pendingResize = true; }
+window.addEventListener('resize',            markResize, { passive: true });
+window.addEventListener('orientationchange', markResize, { passive: true });
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', markResize, { passive: true });
+}
 applyResize();
 var tx=0.5, ty=0.5, sx=0.5, sy=0.5;
 var interact=0.0, lastMove=-1e9, isActive=false;
-function onMove(x, y) {
+function clamp01(v){ return v<0?0:(v>1?1:v); }
+function onPointer(e){
   var rc = canvas.getBoundingClientRect();
-  tx = (x - rc.left)/rc.width;
-  ty = 1.0 - (y - rc.top)/rc.height;
+  tx = clamp01((e.clientX - rc.left)/rc.width);
+  ty = clamp01(1.0 - (e.clientY - rc.top)/rc.height);
   lastMove = performance.now();
   isActive = true;
 }
-window.addEventListener('mousemove',  function(e){ onMove(e.clientX,e.clientY); }, {passive:true});
-window.addEventListener('mouseleave', function(){  isActive=false; }, {passive:true});
-window.addEventListener('touchstart', function(e){ onMove(e.touches[0].clientX,e.touches[0].clientY); }, {passive:true});
-window.addEventListener('touchmove',  function(e){ e.preventDefault(); onMove(e.touches[0].clientX,e.touches[0].clientY); }, {passive:false});
-window.addEventListener('touchend',   function(){  isActive=false; }, {passive:true});
+canvas.addEventListener('pointermove', onPointer, {passive:true});
+canvas.addEventListener('pointerdown', onPointer, {passive:true});
+window.addEventListener('pointerup',     function(){ isActive=false; }, {passive:true});
+window.addEventListener('pointercancel', function(){ isActive=false; }, {passive:true});
+window.addEventListener('pointerleave',  function(){ isActive=false; }, {passive:true});
 var startT = performance.now();
 var prevT  = startT;
 var elapsed  = 0.0;
 var warpTime = 0.0;
+var rafId = 0;
+var running = true;
 function render(now) {
-  requestAnimationFrame(render);
+  if (!running) return;
+  rafId = requestAnimationFrame(render);
   if (pendingResize) { applyResize(); pendingResize = false; }
   var dt = Math.min((now - prevT)*0.001, 0.05);
   prevT = now;
@@ -392,7 +414,29 @@ function render(now) {
   gl.uniform1f(U.interact, interact);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
-requestAnimationFrame(render);
+
+// Pausa quando la tab non è visibile (risparmio batteria/calore)
+document.addEventListener('visibilitychange', function(){
+  if (document.hidden) {
+    running = false;
+    cancelAnimationFrame(rafId);
+  } else if (!running) {
+    running = true;
+    prevT = performance.now();   // evita un salto di dt al risveglio
+    rafId = requestAnimationFrame(render);
+  }
+}, false);
+
+// Perdita del contesto WebGL (può capitare su mobile): ferma e mostra il fallback
+canvas.addEventListener('webglcontextlost', function(e){
+  e.preventDefault();
+  running = false;
+  cancelAnimationFrame(rafId);
+  canvas.style.display = 'none';
+  document.getElementById('fallback').style.display = 'flex';
+}, false);
+
+rafId = requestAnimationFrame(render);
 }());
 </script>
 </body>
